@@ -196,7 +196,10 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
         return SemanticContactObjective(inner, self.release_start_frame, device_arrays,
             wp.zeros(world_count, dtype=wp.float32, device=device), model.body_count // world_count,
             contact.layout.object_body_ids[0], self.semantic_sigma_m,
-            self.semantic_alignment_weight, wp.zeros(world_count, dtype=wp.float32, device=device))
+            self.semantic_alignment_weight, wp.zeros(world_count, dtype=wp.float32, device=device),
+            wp.zeros(world_count, dtype=wp.float32, device=device),
+            wp.zeros(world_count, dtype=wp.float32, device=device),
+            wp.zeros(world_count * 2 * 6, dtype=wp.float32, device=device))
 
 
 @dataclass
@@ -208,11 +211,21 @@ class SemanticContactObjective(ReleaseContactObjective):
     sigma_m: float
     alignment_weight: float
     alignment_cost: object
+    raw_support_snapshot: object
+    mixed_support_snapshot: object
+    role_diagnostics: object
+
+    def transition_metrics(self):
+        from experiments.nvidia_v2d.semantic_contact_metrics import summarize_transition
+        return summarize_transition(self.role_diagnostics.numpy(), self.raw_support_snapshot.numpy(),
+            self.role_match.numpy(), self.alignment_cost.numpy(), self.mixed_support_snapshot.numpy(),
+            self.alignment_weight)
 
     def evaluate(self, state, timestep, terminated):
         self.inner.evaluate(state, timestep, terminated)
         raw = self.inner.inner
         a = self.role_arrays
+        wp.copy(self.raw_support_snapshot, raw.buffers.contact_wrench_support)
         wp.launch(match_semantic_contacts, dim=raw.world_count, inputs=[state.body_q, timestep,
             raw.contact.raw_contact_count, a["active"], a["body_ids"], a["slot_ids"],
             a["robot_point_local"], a["robot_normal_local"], a["object_point_local"], a["object_normal_local"],
@@ -224,6 +237,13 @@ class SemanticContactObjective(ReleaseContactObjective):
                 a["object_point_local"], a["object_normal_local"], raw.num_frames, 2,
                 self.bodies_per_world, self.object_body, self.alignment_weight],
                 outputs=[self.alignment_cost, raw.buffers.contact_wrench_support])
+        wp.copy(self.mixed_support_snapshot, raw.buffers.contact_wrench_support)
+        from experiments.nvidia_v2d.semantic_contact_metrics import record_roles
+        wp.launch(record_roles, dim=(raw.world_count, 2), inputs=[state.body_q, timestep,
+            raw.contact.raw_contact_count, a["active"], a["body_ids"], a["slot_ids"],
+            a["robot_point_local"], a["robot_normal_local"], a["object_point_local"], a["object_normal_local"],
+            raw.num_frames, 2, self.bodies_per_world, self.object_body, raw.contact.layout.slots_per_world],
+            outputs=[self.role_diagnostics])
         raw.buffers.compose(terminated, raw.action_rate_l2, raw.action_l2)
 
 

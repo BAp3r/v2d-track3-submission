@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import importlib.util
 import csv
 import hashlib
+import importlib.util
 import json
 import math
 import os
 import sys
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,7 @@ class JsonMetricLogger:
     def __init__(
         self, path: Path, *, resume: bool = False, delegate: Any = None,
         context: Mapping[str, Any] | None = None,
+        metric_provider: Callable[[], Mapping[str, float]] | None = None,
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         if resume and path.exists():
@@ -45,6 +46,7 @@ class JsonMetricLogger:
             metadata_stream.flush()
             os.fsync(metadata_stream.fileno())
         self.delegate = delegate
+        self.metric_provider = metric_provider
         self.last_step = -1
         self.count = 0
         self.closed = False
@@ -52,6 +54,11 @@ class JsonMetricLogger:
     def log(self, metrics: Mapping[str, float], step: int) -> None:
         if step <= self.last_step:
             raise ValueError("指标步数必须严格递增")
+        if self.metric_provider is not None:
+            extra = self.metric_provider()
+            if metrics.keys() & extra.keys():
+                raise ValueError("诊断指标不能覆盖训练指标")
+            metrics = {**metrics, **extra}
         invalid = [name for name, value in metrics.items() if not math.isfinite(float(value))]
         row = {
             "schema_version": "nvidia_v2d.policy_metrics.v2",
@@ -108,14 +115,22 @@ def main() -> None:
     original = module.run_training
 
     def logged_training(*args, **kwargs):
+        environment = args[0] if args else kwargs.get("env")
+        objective = getattr(getattr(environment, "env", None), "objective", None)
+        provider = getattr(objective, "transition_metrics", None)
         logger = JsonMetricLogger(
             Path(metrics_path), delegate=kwargs.get("logger"),
+            metric_provider=provider,
             context={
                 "script": script,
                 "script_sha256": hashlib.sha256(Path(script).read_bytes()).hexdigest(),
                 "overrides": overrides,
                 "aggregation": "one_collection_all_optimizer_updates_mean",
                 "log_interval": 1,
+                "contact_diagnostics": (
+                    "last_collection_transition_before_autoreset; per_side_means_conditioned_on_active_role"
+                    if provider is not None else "unavailable"
+                ),
             },
         )
         kwargs["logger"] = logger

@@ -38,7 +38,8 @@ from experiments.nvidia_v2d.policy_experiment import (
 LEGACY_ROOT = Path("/var/tmp/fmc3-sharpa-validation-20261027-001")
 FROZEN_IMAGE = "sha256:7fdce3ad594fbad8b5983fde7846908be2ed6179ba4ebcfd1edefbcbcf4c628c"
 SOURCE_FILES = (*CODE_FILES, "policy_single_sample.py", "physical_wrist_config.py",
-                "release_contact_objective.py", "semantic_contact_objective.py", "policy_replay_contract.py")
+                "release_contact_objective.py", "semantic_contact_objective.py", "semantic_contact_metrics.py",
+                "policy_replay_contract.py")
 
 
 class SingleSampleSpec(ExperimentSpec):

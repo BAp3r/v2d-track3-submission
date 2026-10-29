@@ -102,6 +102,8 @@ def main() -> None:
 
     bodies, diagnostics, slot_contacts, scales, ground_contacts = [], [], [], [], []
     contact_frames, policy_actions, body_velocities, joint_targets = [], [], [], []
+    state_joint_q, state_joint_qd = [], []
+    semantic_roles, semantic_support = [], []
     metadata = {}
     reference_wrists = {}
     initial = {}
@@ -121,6 +123,22 @@ def main() -> None:
                         body_count=count, world_count=env.world_count,
                         fps=float(env.config.sim.fps), action_dimension=env.action.action_dim)
         metadata["body_mass_kg"] = model.body_mass.numpy().reshape(env.world_count, count).tolist()
+        if args.capture_contacts:
+            metadata["joint_state_recording"] = {
+                "source": "env.state_0.joint_q and joint_qd immediately after jax_env.step",
+                "interpretation": "raw solver arrays; verify FK against captured body poses before interpreting as realized joint angles",
+                "joint_labels": list(model.joint_label),
+                "joint_q_start": model.joint_q_start.numpy().tolist(),
+                "joint_qd_start": model.joint_qd_start.numpy().tolist(),
+            }
+            if hasattr(env.objective, "role_diagnostics"):
+                metadata["semantic_transition_recording"] = {
+                    "scope": "objective evaluation before lifecycle advancement or reset",
+                    "side_order": ["left", "right"],
+                    "role_columns": ["active", "outside_target_distance_m", "normal_dot", "role_pair", "geometry_cost", "distance_cap"],
+                    "support_columns": ["raw", "role_match", "alignment_cost", "mixed"],
+                    "alignment_weight": env.objective.alignment_weight,
+                }
         source_path = Path(reference.metadata.source_path)
         # ManoSharpa parquet has one nested row; num_rows is not the frame count.
         raw_object_positions = np.asarray(pq.read_table(
@@ -225,6 +243,14 @@ def main() -> None:
                     })
                     body_velocities.append(env.state_0.body_qd.numpy().reshape(env.world_count, count, 6).copy())
                     joint_targets.append(env.action.joint_target.numpy().copy())
+                    state_joint_q.append(env.state_0.joint_q.numpy().copy())
+                    state_joint_qd.append(env.state_0.joint_qd.numpy().copy())
+                    if hasattr(env.objective, "role_diagnostics"):
+                        objective = env.objective
+                        semantic_roles.append(objective.role_diagnostics.numpy().reshape(env.world_count, 2, 6).copy())
+                        semantic_support.append(np.stack([value.numpy() for value in (
+                            objective.raw_support_snapshot, objective.role_match, objective.alignment_cost,
+                            objective.mixed_support_snapshot)], axis=-1))
                 ground_contacts.append(int(np.count_nonzero((contacts.body0_ids < 0) | (contacts.body1_ids < 0))))
                 return result
 
@@ -267,7 +293,12 @@ def main() -> None:
         feedback_data.update(pack_contact_frames(contact_frames),
                              policy_actions=np.asarray(policy_actions),
                              actual_body_velocities=np.asarray(body_velocities),
-                             action_joint_targets=np.asarray(joint_targets))
+                             action_joint_targets=np.asarray(joint_targets),
+                             state_joint_q=np.asarray(state_joint_q),
+                             state_joint_qd=np.asarray(state_joint_qd))
+        if semantic_roles:
+            feedback_data.update(semantic_role_diagnostics=np.asarray(semantic_roles),
+                                 semantic_support_diagnostics=np.asarray(semantic_support))
     np.savez_compressed(args.output / "diagnostic.npz", actual_bodies=np.asarray(bodies),
                         initial_bodies=initial["body_pose"], diagnostics=np.asarray(diagnostics),
                         hand_object_contact_counts=np.asarray(slot_contacts),

@@ -1,5 +1,5 @@
-import json
 import csv
+import json
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -101,6 +101,7 @@ def test_large_history_curve_sampling_is_bounded_and_preserves_raw_endpoints(tmp
 
 def test_wrapper_records_every_collection_and_closes_after_training_failure(tmp_path, monkeypatch):
     import sys
+
     from experiments.nvidia_v2d.policy_metric_logging import main
 
     script = tmp_path / "train.py"
@@ -120,3 +121,20 @@ def test_wrapper_records_every_collection_and_closes_after_training_failure(tmp_
     assert row["context"]["log_interval"] == 1
     assert row["metrics"]["actor_loss"] == -0.8
     assert (tmp_path / "train-metrics.loss.svg").exists()
+
+
+def test_transition_diagnostics_are_live_preserved_and_cannot_replace_losses(tmp_path):
+    state = {"contact/right/target_distance_m": .11}
+    path = tmp_path / "metrics.jsonl"
+    logger = JsonMetricLogger(path, metric_provider=lambda: state.copy())
+    logger.log({"actor_loss": -1.}, 256)
+    state["contact/right/target_distance_m"] = .06
+    logger.log({"actor_loss": -2.}, 512)
+    state["actor_loss"] = 99.
+    with pytest.raises(ValueError, match="覆盖"):
+        logger.log({"actor_loss": -3.}, 768)
+    logger.close()
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [r["metrics"]["contact/right/target_distance_m"] for r in rows] == [.11, .06]
+    assert [r["metrics"]["actor_loss"] for r in rows] == [-1., -2.]
+    assert (tmp_path / "metrics.contact.svg").exists()

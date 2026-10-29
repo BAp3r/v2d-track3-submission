@@ -88,7 +88,8 @@ def export_curves(path: Path) -> list[Path]:
     groups = {
         "loss": [name for name in names if "loss" in name],
         "evaluation": [name for name in names if name.startswith("evaluation/")],
-        "training": [name for name in names if "loss" not in name and not name.startswith("evaluation/")],
+        "contact": [name for name in names if name.startswith("contact/")],
+        "training": [name for name in names if "loss" not in name and not name.startswith(("evaluation/", "contact/"))],
     }
     outputs = []
     for group, selected in groups.items():
