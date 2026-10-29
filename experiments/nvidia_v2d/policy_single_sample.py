@@ -39,7 +39,7 @@ LEGACY_ROOT = Path("/var/tmp/fmc3-sharpa-validation-20261027-001")
 FROZEN_IMAGE = "sha256:7fdce3ad594fbad8b5983fde7846908be2ed6179ba4ebcfd1edefbcbcf4c628c"
 SOURCE_FILES = (*CODE_FILES, "policy_single_sample.py", "physical_wrist_config.py",
                 "release_contact_objective.py", "semantic_contact_objective.py", "semantic_contact_metrics.py",
-                "policy_replay_contract.py")
+                "right_wrist_command_objective.py", "policy_replay_contract.py")
 
 
 class SingleSampleSpec(ExperimentSpec):
@@ -74,6 +74,8 @@ class SingleSampleSpec(ExperimentSpec):
     semantic_sigma_m: float = Field(default=0.02, gt=0, le=0.1, allow_inf_nan=False)
     sim_substeps: int = Field(default=5, ge=5, le=40, strict=True)
     semantic_alignment_weight: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
+    semantic_wrist_command_weight: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
+    semantic_wrist_command_deadzone_m: float = Field(default=0.02, ge=0, le=.1, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def physical_contract(self) -> SingleSampleSpec:
@@ -103,6 +105,8 @@ class SingleSampleSpec(ExperimentSpec):
             raise ValueError("semantic contact requires a hashed map/reference and release frame")
         if self.semantic_alignment_weight and self.semantic_map_path is None:
             raise ValueError("semantic alignment requires a trusted role map")
+        if self.semantic_wrist_command_weight and self.semantic_map_path is None:
+            raise ValueError("semantic wrist command penalty requires a trusted role map")
         return self
 
 
@@ -159,7 +163,11 @@ def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[st
                      f"+objective.semantic_reference_sha256='{spec.semantic_reference_sha256}'",
                      f"+objective.semantic_motion_speed={spec.motion_speed}",
                      f"+objective.semantic_sigma_m={spec.semantic_sigma_m}",
-                     f"+objective.semantic_alignment_weight={spec.semantic_alignment_weight}"])
+                     f"+objective.semantic_alignment_weight={spec.semantic_alignment_weight}",
+                     f"+objective.semantic_wrist_command_weight={spec.semantic_wrist_command_weight}",
+                     f"+objective.semantic_wrist_command_deadzone_m={spec.semantic_wrist_command_deadzone_m}"])
+        if spec.semantic_wrist_command_weight > 0:
+            args.append("action.wrist_pos_scale=0.05")
     if spec.resume_checkpoint is not None:
         args.extend(["training.resume=true", f"training.checkpoint_path='{spec.resume_checkpoint}'"])
         args.append("training.checkpoint.load_replay_path=null" if spec.reset_replay else
@@ -255,6 +263,8 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
     for action in (config["action"], config["env"]["action"]):
         if action["wrist_pos_clip"] != (0.2 if spec.wrist_pos_clip is None else spec.wrist_pos_clip):
             raise ValueError("checkpoint wrist residual bound differs from the frozen spec")
+        if spec.semantic_wrist_command_weight > 0 and action.get("wrist_pos_scale") != .05:
+            raise ValueError("checkpoint wrist command cost scale differs from the frozen spec")
     if any(stage["objective_weights"]["unintended_contact"] != spec.unintended_contact_weight
            for stage in config["curriculum"]["stages"]):
         raise ValueError("checkpoint contact penalty differs from the frozen spec")
@@ -274,6 +284,9 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
             raise ValueError("checkpoint semantic contact contract differs from the frozen spec")
         if spec.semantic_map_path is not None and objective.get("semantic_alignment_weight", 0.) != spec.semantic_alignment_weight:
             raise ValueError("checkpoint semantic alignment differs from the frozen spec")
+        if spec.semantic_map_path is not None and any(objective.get(key, default) != getattr(spec, key)
+                for key, default in (("semantic_wrist_command_weight", 0.), ("semantic_wrist_command_deadzone_m", .02))):
+            raise ValueError("checkpoint wrist command penalty differs from the frozen spec")
     output.mkdir(parents=True, exist_ok=True)
     with explicit_support(spec) as receipt:
         evidence = evaluate_with_evidence(checkpoint, spec.evaluation_worlds, output,

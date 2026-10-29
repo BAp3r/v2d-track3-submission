@@ -173,6 +173,8 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
     semantic_motion_speed: float = .5
     semantic_sigma_m: float = .02
     semantic_alignment_weight: float = 0.0
+    semantic_wrist_command_weight: float = 0.0
+    semantic_wrist_command_deadzone_m: float = 0.02
 
     def __post_init__(self):
         super().__post_init__()
@@ -182,6 +184,10 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
             raise ValueError("semantic motion speed and sigma must be finite and positive")
         if not math.isfinite(self.semantic_alignment_weight) or not 0 <= self.semantic_alignment_weight <= 1:
             raise ValueError("semantic alignment weight must be finite in [0, 1]")
+        if not math.isfinite(self.semantic_wrist_command_weight) or not 0 <= self.semantic_wrist_command_weight <= 1:
+            raise ValueError("semantic wrist command weight must be finite in [0, 1]")
+        if not math.isfinite(self.semantic_wrist_command_deadzone_m) or not 0 <= self.semantic_wrist_command_deadzone_m <= .1:
+            raise ValueError("semantic wrist command deadzone must be finite in [0, .1] meters")
 
     def build(self, model, embodiment, robot_reference, reference, command, contact, action,
               world_count, frame_dt, device=None, reference_joint_q_offset=None, episode_start_frame=None):
@@ -193,13 +199,23 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
             raise ValueError("semantic grasp attraction must be disabled during release")
         device_arrays = {key: wp.array(values.reshape(-1) if values.ndim == 2 else values.reshape(-1, 3),
             dtype=wp.int32 if values.ndim == 2 else wp.vec3, device=device) for key, values in arrays.items()}
+        command_penalty = None
+        if self.semantic_wrist_command_weight > 0:
+            from experiments.nvidia_v2d.right_wrist_command_objective import (
+                RightWristCommandCostConfig,
+                bind_right_wrist_command_penalty,
+            )
+            command_penalty = bind_right_wrist_command_penalty(action, device_arrays["active"],
+                role_sides=("left", "right"), release_start_frame=self.release_start_frame,
+                config=RightWristCommandCostConfig(deadzone_m=self.semantic_wrist_command_deadzone_m))
         return SemanticContactObjective(inner, self.release_start_frame, device_arrays,
             wp.zeros(world_count, dtype=wp.float32, device=device), model.body_count // world_count,
             contact.layout.object_body_ids[0], self.semantic_sigma_m,
             self.semantic_alignment_weight, wp.zeros(world_count, dtype=wp.float32, device=device),
             wp.zeros(world_count, dtype=wp.float32, device=device),
             wp.zeros(world_count, dtype=wp.float32, device=device),
-            wp.zeros(world_count * 2 * 6, dtype=wp.float32, device=device))
+            wp.zeros(world_count * 2 * 6, dtype=wp.float32, device=device),
+            command_penalty, self.semantic_wrist_command_weight)
 
 
 @dataclass
@@ -214,12 +230,23 @@ class SemanticContactObjective(ReleaseContactObjective):
     raw_support_snapshot: object
     mixed_support_snapshot: object
     role_diagnostics: object
+    wrist_command_penalty: object = None
+    wrist_command_weight: float = 0.0
 
     def transition_metrics(self):
         from experiments.nvidia_v2d.semantic_contact_metrics import summarize_transition
-        return summarize_transition(self.role_diagnostics.numpy(), self.raw_support_snapshot.numpy(),
+        metrics = summarize_transition(self.role_diagnostics.numpy(), self.raw_support_snapshot.numpy(),
             self.role_match.numpy(), self.alignment_cost.numpy(), self.mixed_support_snapshot.numpy(),
             self.alignment_weight)
+        if self.wrist_command_penalty is not None:
+            p = self.wrist_command_penalty
+            costs = p.command_cost.numpy()
+            metrics["contact/wrist_command_cost_mean"] = float(costs.mean())
+            metrics["contact/wrist_command_penalty_mean"] = float(self.wrist_command_weight * costs.mean())
+            active = self.role_diagnostics.numpy().reshape(-1, 2, 6)[:, 1, 0] == 1
+            if active.any():
+                metrics["contact/right/wrist_command_distance_m"] = float(p.command_distance.numpy()[active].mean())
+        return metrics
 
     def evaluate(self, state, timestep, terminated):
         self.inner.evaluate(state, timestep, terminated)
@@ -237,6 +264,9 @@ class SemanticContactObjective(ReleaseContactObjective):
                 a["object_point_local"], a["object_normal_local"], raw.num_frames, 2,
                 self.bodies_per_world, self.object_body, self.alignment_weight],
                 outputs=[self.alignment_cost, raw.buffers.contact_wrench_support])
+        if self.wrist_command_penalty is not None:
+            self.wrist_command_penalty.apply(timestep, raw.buffers.contact_wrench_support,
+                                            weight=self.wrist_command_weight)
         wp.copy(self.mixed_support_snapshot, raw.buffers.contact_wrench_support)
         from experiments.nvidia_v2d.semantic_contact_metrics import record_roles
         wp.launch(record_roles, dim=(raw.world_count, 2), inputs=[state.body_q, timestep,

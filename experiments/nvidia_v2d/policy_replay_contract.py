@@ -21,7 +21,9 @@ PHYSICAL_WRIST = "experiments.nvidia_v2d.physical_wrist_config.make_sharpa_confi
 CHECKED_FIELDS = ("objective._target_", "objective.release_start_frame", "action.wrist_pos_clip",
                   "task.motion_speed", "embodiment.wrist_kp", "embodiment.wrist_kd", "task.parquet",
                   "objective.semantic_map_sha256", "objective.semantic_reference_sha256", "objective.semantic_sigma_m",
-                  "objective.semantic_motion_speed", "objective.semantic_alignment_weight", "sim.substeps", "sim.fps")
+                  "objective.semantic_motion_speed", "objective.semantic_alignment_weight",
+                  "objective.semantic_wrist_command_weight", "objective.semantic_wrist_command_deadzone_m",
+                  "action.wrist_pos_scale_for_command_cost", "sim.substeps", "sim.fps")
 _MISSING = object()
 
 
@@ -78,6 +80,7 @@ def _desired_semantics(desired: Mapping[str, Any] | object) -> dict[str, Any]:
         raise ValueError("desired wrist gains require both wrist_kp and wrist_kd")
     clip = _field(desired, "wrist_pos_clip")
     semantic = _field(desired, "semantic_map_path") is not None
+    command_weight = _field(desired, "semantic_wrist_command_weight", 0.) if semantic else None
     return {"objective._target_": SEMANTIC_OBJECTIVE if semantic else BASE_OBJECTIVE if release is None else RELEASE_OBJECTIVE,
             "objective.release_start_frame": release,
             "action.wrist_pos_clip": _number(0.2 if clip is None else clip, "desired wrist_pos_clip"),
@@ -90,6 +93,9 @@ def _desired_semantics(desired: Mapping[str, Any] | object) -> dict[str, Any]:
             "objective.semantic_map_sha256": _field(desired, "semantic_map_sha256") if semantic else None,
             "objective.semantic_reference_sha256": _field(desired, "semantic_reference_sha256") if semantic else None,
             "objective.semantic_alignment_weight": _field(desired, "semantic_alignment_weight", 0.) if semantic else None,
+            "objective.semantic_wrist_command_weight": command_weight,
+            "objective.semantic_wrist_command_deadzone_m": _field(desired, "semantic_wrist_command_deadzone_m", .02) if semantic else None,
+            "action.wrist_pos_scale_for_command_cost": .05 if command_weight else None,
             "objective.semantic_motion_speed": _number(_field(desired, "motion_speed", .5), "desired semantic speed") if semantic else None,
             "objective.semantic_sigma_m": _number(_field(desired, "semantic_sigma_m", .02), "desired semantic sigma") if semantic else None}
 
@@ -107,6 +113,8 @@ def _saved_semantics(config: Mapping[str, Any]) -> dict[str, Any]:
     actions = _section(config, "action")
     clip = _agreed([_number(section.get("wrist_pos_clip"), "saved action.wrist_pos_clip")
                     for section in actions], "action.wrist_pos_clip")
+    command_weight = _agreed([o.get("semantic_wrist_command_weight", 0.)
+        for o in objectives], "semantic_wrist_command_weight") if target == SEMANTIC_OBJECTIVE else None
     wrist = _path(config, "embodiment.config")
     if not isinstance(wrist, Mapping):
         raise TypeError("saved config lacks embodiment.config")
@@ -127,12 +135,18 @@ def _saved_semantics(config: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("saved wrist target is unknown to this replay contract")
     return {"objective._target_": target, "objective.release_start_frame": release,
             "action.wrist_pos_clip": clip,
+            "action.wrist_pos_scale_for_command_cost": _agreed([
+                _number(a.get("wrist_pos_scale"), "saved action.wrist_pos_scale") for a in actions],
+                "action.wrist_pos_scale") if command_weight else None,
             "task.motion_speed": _number(_path(config, "task.motion_speed"), "saved task.motion_speed"),
             "embodiment.wrist_kp": _number(kp, "saved wrist_kp"),
             "embodiment.wrist_kd": _number(kd, "saved wrist_kd"),
             "task.parquet": _reference_path(_path(config, "task.parquet")),
             "objective.semantic_alignment_weight": _agreed([o.get("semantic_alignment_weight", 0.)
                 for o in objectives], "semantic_alignment_weight") if target == SEMANTIC_OBJECTIVE else None,
+            "objective.semantic_wrist_command_weight": command_weight,
+            "objective.semantic_wrist_command_deadzone_m": _agreed([o.get("semantic_wrist_command_deadzone_m", .02)
+                for o in objectives], "semantic_wrist_command_deadzone_m") if target == SEMANTIC_OBJECTIVE else None,
             **{f"sim.{key}": _agreed([_number(s.get(key), f"saved sim.{key}")
                 for s in _section(config, "sim")], f"sim.{key}") for key in ("substeps", "fps")},
             **{f"objective.{key}": _agreed([o.get(key) for o in objectives], key) if target == SEMANTIC_OBJECTIVE else None
@@ -146,7 +160,8 @@ def require_replay_compatibility(desired: Mapping[str, Any] | object,
     ``desired`` may be SingleSampleSpec or its model_dump mapping. ``saved_config``
     is json.loads(read_checkpoint_metadata(state)["resolved_config_json"]).
     No imports from policy_single_sample, FlashCHORD, JAX, or GPU code are needed.
-    Weight-only and reset-distribution changes are deliberately outside comparison.
+    Outer objective weights and reset distributions are outside comparison.
+    Weights baked inside the stored semantic support term must match.
     """
     checkpoint = _field(desired, "resume_checkpoint")
     replay = _field(desired, "resume_replay")

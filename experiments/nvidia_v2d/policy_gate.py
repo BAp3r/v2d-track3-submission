@@ -35,7 +35,7 @@ def verify_gate(
 
     try:
         gate = json.loads(check(path))
-        if gate.get("schema_version") == "nvidia_v2d.repaired_reference_gate.v1":
+        if gate.get("schema_version") in ("nvidia_v2d.repaired_reference_gate.v1", "nvidia_v2d.repaired_reference_gate.v2"):
             # A derived reference keeps the original input gate and binds every
             # repair/audit artifact. It cannot borrow the old output's hash or
             # silently declare full geometric/physical quality established.
@@ -65,6 +65,14 @@ def verify_gate(
             audit = json.loads(bound(Path(manifest["audit_path"]), manifest["audit_sha256"]))
             required = ("finite_arrays", "frame_count", "contact_normals", "object_support",
                         "robot_contact_mapping", "release_clearance", "unchanged_auxiliary_and_physics")
+            if gate["schema_version"] == "nvidia_v2d.repaired_reference_gate.v2":
+                if manifest.get("schema") != "nvidia_v2d.collision_reference_repair.v1":
+                    raise ValueError("v2 repair gate requires actual collision union provenance")
+                bound(Path(manifest["collision_union_path"]), manifest["collision_union_sha256"])
+                if audit.get("collision_union_sha256") != manifest["collision_union_sha256"]:
+                    raise ValueError("actual collision union was not accepted with this reference")
+                required += ("actual_object_collision_union", "full_hand_collision_union",
+                             "temporal_continuity", "source_contact_evidence_preserved")
             if (audit.get("candidate_sha256") != manifest["output_sha256"]
                     or any(audit.get("checks", {}).get(name) is not True for name in required)):
                 raise ValueError("repaired reference is missing required independent acceptance checks")

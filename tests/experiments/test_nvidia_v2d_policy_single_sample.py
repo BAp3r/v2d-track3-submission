@@ -214,6 +214,13 @@ def test_semantic_contact_requires_bound_reference_and_preserves_release(tmp_pat
     assert not any(value.startswith(("termination.", "action.wrist_tau_max=")) for value in args)
     with pytest.raises(ValueError, match="trusted role map"):
         make_spec(tmp_path, semantic_alignment_weight=.25)
+    with pytest.raises(ValueError, match="trusted role map"):
+        make_spec(tmp_path, semantic_wrist_command_weight=.25)
+    penalized = spec.model_copy(update={"semantic_wrist_command_weight": .25})
+    overrides = physical_training_overrides(penalized, Path("/run"))
+    assert "+objective.semantic_wrist_command_weight=0.25" in overrides
+    assert "+objective.semantic_wrist_command_deadzone_m=0.02" in overrides
+    assert "action.wrist_pos_scale=0.05" in overrides
 
 
 def test_semantic_reference_and_role_map_must_share_an_acceptance_receipt(tmp_path, monkeypatch):

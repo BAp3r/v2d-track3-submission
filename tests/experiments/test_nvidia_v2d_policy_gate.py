@@ -177,3 +177,36 @@ def test_repaired_gate_rejects_unaccepted_contact_mapping_even_with_fresh_hashes
     gate.write_text(json.dumps(record))
     with pytest.raises(ValueError, match="acceptance"):
         verify_gate(gate, backend="official", parquet=candidate)
+
+
+@pytest.mark.parametrize("missing", [None, "actual_object_collision_union", "full_hand_collision_union",
+                                    "temporal_continuity", "source_contact_evidence_preserved"])
+def test_collision_gate_requires_real_union_and_complete_audit(tmp_path, missing):
+    gate, candidate, audit = repaired_gate(tmp_path)
+    union = tmp_path / "collision.npz"
+    union.write_bytes(b"frozen actual convex shapes")
+    digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    record = json.loads(audit.read_text())
+    for key in ("actual_object_collision_union", "full_hand_collision_union", "temporal_continuity",
+                "source_contact_evidence_preserved"):
+        record["checks"][key] = True
+    if missing:
+        del record["checks"][missing]
+    record["collision_union_sha256"] = digest(union)
+    audit.write_text(json.dumps(record))
+    manifest = tmp_path / "repair-manifest.json"
+    record = json.loads(manifest.read_text())
+    record.update(schema="nvidia_v2d.collision_reference_repair.v1", collision_union_path=str(union),
+                  collision_union_sha256=digest(union), audit_sha256=digest(audit))
+    manifest.write_text(json.dumps(record))
+    record = json.loads(gate.read_text())
+    record.update(schema_version="nvidia_v2d.repaired_reference_gate.v2", repair_manifest_sha256=digest(manifest))
+    gate.write_text(json.dumps(record))
+    if missing:
+        with pytest.raises(ValueError, match="acceptance"):
+            verify_gate(gate, backend="official", parquet=candidate)
+    else:
+        assert str(union) in verify_gate(gate, backend="official", parquet=candidate)["verified_files"]
+        union.write_bytes(b"changed actual convex shapes")
+        with pytest.raises(ValueError, match="变化"):
+            verify_gate(gate, backend="official", parquet=candidate)

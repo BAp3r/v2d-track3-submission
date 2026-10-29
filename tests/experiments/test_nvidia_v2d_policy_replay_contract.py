@@ -186,3 +186,27 @@ def test_semantic_contact_definition_cannot_reuse_old_aggregate_wrench_terms():
         require_replay_compatibility(spec | {"semantic_map_sha256": "c"*64}, cfg)
     with pytest.raises(ValueError, match="semantic_alignment_weight"):
         require_replay_compatibility(spec | {"semantic_alignment_weight": .25}, cfg)
+
+
+def test_wrist_command_penalty_binds_weight_deadzone_and_actual_scale():
+    spec = desired(release_start_frame=407, semantic_map_path="/roles.npz",
+        semantic_map_sha256="a"*64, semantic_reference_sha256="b"*64,
+        semantic_sigma_m=.02, semantic_wrist_command_weight=.25)
+    cfg = saved_config(release=407)
+    for objective in (cfg["objective"], cfg["env"]["objective"]):
+        objective.update(_target_=SEMANTIC_OBJECTIVE, semantic_map_sha256="a"*64,
+            semantic_reference_sha256="b"*64, semantic_sigma_m=.02, semantic_motion_speed=.5)
+    with pytest.raises(ValueError, match="semantic_wrist_command_weight"):
+        require_replay_compatibility(spec, cfg)
+    for objective in (cfg["objective"], cfg["env"]["objective"]):
+        objective.update(semantic_wrist_command_weight=.25, semantic_wrist_command_deadzone_m=.02)
+    for action in (cfg["action"], cfg["env"]["action"]):
+        action["wrist_pos_scale"] = .05
+    assert require_replay_compatibility(spec, cfg)["status"] == "compatible"
+    for field, value in (("semantic_wrist_command_weight", .1), ("semantic_wrist_command_deadzone_m", 0.)):
+        with pytest.raises(ValueError, match=field):
+            require_replay_compatibility(spec | {field: value}, cfg)
+    for action in (cfg["action"], cfg["env"]["action"]):
+        action["wrist_pos_scale"] = .1
+    with pytest.raises(ValueError, match="wrist_pos_scale_for_command_cost"):
+        require_replay_compatibility(spec, cfg)

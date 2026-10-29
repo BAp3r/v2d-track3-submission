@@ -129,3 +129,10 @@ def test_alignment_weight_defaults_to_legacy_zero_and_is_bounded():
     for weight in (-.1, 1.1, float('nan')):
         with pytest.raises(ValueError, match="alignment weight"):
             make_semantic_contact_objective(**fields, semantic_alignment_weight=weight)
+        with pytest.raises(ValueError, match="wrist command weight"):
+            make_semantic_contact_objective(**fields, semantic_wrist_command_weight=weight)
+    cfg = make_semantic_contact_objective(**fields, semantic_wrist_command_weight=.25)
+    assert cfg.semantic_wrist_command_deadzone_m == .02
+    for deadzone in (-.1, .11, float('nan')):
+        with pytest.raises(ValueError, match="wrist command deadzone"):
+            make_semantic_contact_objective(**fields, semantic_wrist_command_deadzone_m=deadzone)

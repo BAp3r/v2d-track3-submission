@@ -138,7 +138,11 @@ def main() -> None:
                     "role_columns": ["active", "outside_target_distance_m", "normal_dot", "role_pair", "geometry_cost", "distance_cap"],
                     "support_columns": ["raw", "role_match", "alignment_cost", "mixed"],
                     "alignment_weight": env.objective.alignment_weight,
+                    "wrist_command_weight": env.objective.wrist_command_weight,
                 }
+                if env.objective.wrist_command_penalty is not None:
+                    metadata["semantic_transition_recording"]["support_columns"].extend([
+                        "wrist_command_distance_m", "wrist_command_cost"])
         source_path = Path(reference.metadata.source_path)
         # ManoSharpa parquet has one nested row; num_rows is not the frame count.
         raw_object_positions = np.asarray(pq.read_table(
@@ -248,9 +252,13 @@ def main() -> None:
                     if hasattr(env.objective, "role_diagnostics"):
                         objective = env.objective
                         semantic_roles.append(objective.role_diagnostics.numpy().reshape(env.world_count, 2, 6).copy())
-                        semantic_support.append(np.stack([value.numpy() for value in (
+                        support_values = [value.numpy() for value in (
                             objective.raw_support_snapshot, objective.role_match, objective.alignment_cost,
-                            objective.mixed_support_snapshot)], axis=-1))
+                            objective.mixed_support_snapshot)]
+                        if objective.wrist_command_penalty is not None:
+                            support_values.extend([objective.wrist_command_penalty.command_distance.numpy(),
+                                                   objective.wrist_command_penalty.command_cost.numpy()])
+                        semantic_support.append(np.stack(support_values, axis=-1))
                 ground_contacts.append(int(np.count_nonzero((contacts.body0_ids < 0) | (contacts.body1_ids < 0))))
                 return result
 

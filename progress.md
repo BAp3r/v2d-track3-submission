@@ -655,3 +655,11 @@
 - 下一轮代码增加每collection现场接触分量（左右可信活跃数、目标距离、法向、角色pair、原始/角色调制wrench、对齐惩罚和最终support）以及独立contact.svg；保留原actor/critic/temperature loss逐collection记录。数据在objective执行时采样，明确为最近一次transition而非优化器均值；尚未作为新训练结果。冻结环境真实Warp/Hydra19专项测试及host记录8项通过。
 - 009/010/011汇总report-002完成，24576训练行、12正式评估以及各组全部独立补录均保留。每组319488个训练来源标量和84个评估来源标量，两端逐step/value独立回读完全一致；SDK额外系统遥测单列。report-001原SHA不变。
 - 新诊断代码实际CUDA完成1world×496步instrumentation测试（非新训练、非稳定性复评）：现场距离与独立body-pose复算最大差约0.052µm、法向dot差1.87e-6、pair差0，混合support恒等式逐值成立；inactive行全0。raw solver joint_q/qd也已补录，尚须独立FK验证后才能解释为实际关节读数。完整CPU套件430通过、16可选依赖跳过。
+
+## 2026-10-29 — 右腕策略偏移与真实碰撞参考联合修复
+
+- 控制链独立复核source4–8s全部32world可信右手状态：011实际role误差111.75mm、命令FK误差144.42mm，原参考FK对实际锅仅11.23mm。命令只恢复参考右腕、保留actor指关节时降至36.01mm；只恢复拇指q仍142.26mm。右腕命令偏移是优先修正项，不能只加手指映射或归因伺服。实际body→关节→冻结Newton FK角色位置误差<0.16µm；新raw joint_q补录也验证真实更新，与记录body FK最大差0.170µm。旧未录joint_q数据仍标记为body反求，不混淆来源。
+- 新可选right_wrist_command_objective只改训练奖励：可信右role且release前，按右腕目标偏离其实际动作参考的距离扣分；明确解析semantic left/right与action right/left不同侧序。动作、joint_target、控制器、力限与推理路径不改。默认weight0保持旧路径，scale从实际action .05m读取，cap由三轴.2m界的径向上界确定；未知/释放先分支再读目标。启用时replay绑定weight、deadzone、action scale，必须fresh replay。
+- 012方案已先登记collision-command-followup-plan.json：从011状态10485760恢复到12582912，fresh replay，alignment .25保留，新右腕项weight .25、deadzone20mm，参考必须新v2实际碰撞并集门控通过。此为基于多项失败证据的联合后续修复，不宣称单因素对照。目前仍未开训。
+- 右腕奖励接线完成独立审查，真实CPU Warp32项通过；host完整436通过、17可选依赖跳过。额外1world×496步实际CUDA接线测试中90个可信右帧均正确激活，命令距离与独立复算最大差1.38e-8m、cost差3.17e-7，support组合误差0；全部未知及释放cost0。仅是运行接线验证，没有优化或新成功率结论。
+- 全真实碰撞并集基线source249+runtime496×双手共1490帧侧检查：原001源帧左49/249、右16/249采样深度>4mm，最大8.432/4.977mm。局部IK已在最坏左22/24/27通过原4mm穿入、6mm接触和.5法向门槛，未删目标或放宽判据；仍在处理全时序速度、重采样与全部其余帧，局部通过不代表新参考已准入。
