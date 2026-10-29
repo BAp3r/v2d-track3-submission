@@ -701,3 +701,11 @@
 - 派生物体四检查点曲线与独立补录物理质量分别导入双看板，明确posthoc与独立cohort；372个源标量、各端402条含附加时间记录逐值验证，HTTP5092/6006均200。原live日志未改。
 - 实现提交284778bf；464 CPU测试通过、24可选依赖跳过，Dex旧standalone运行环境9专属测试通过。新geometry helper仅清理未用import/格式，artifact source-snapshot保持原SHA。独立code review无阻塞问题，正式compare已强制全步零辅助凭据。
 - 比赛路径已实际推进到本地提交格式验证：011真实world0 public44导出NONCOMPETITIVE Parquet，496行actual pose与官方mesh编码round-trip误差0。官方packer实际因20评分episode全部缺轨迹而拒绝，保留日志；不将44改名冒充评分episode、不上传不完整结果。20段评测视频已在NAS，官方需36对象/9120模板行；后续主线是评测集覆盖及规范导出，而非等待这个锅每个接触细节完美。
+
+## 2026-10-29 — Edge提交检查与训练前手重建审计
+
+- 用户明确批准改用已登录Edge。browser_submission子代理已核对Kaggle/W&B/HF；尚未正式提交，也没有比赛分数。原public44不是评分episode，不改ID冒充。发现旧批处理36个正式对象已有30份重建束，覆盖15集全部对象；六份重建失败，部分束缺手帧，多物体共同scene adapter仍缺。任务表、原始浏览器证据、命令保存在browser-submission-20261029-001。
+- 正式episode37（木勺151帧）已通过真实视频/NPZ哈希及桥接输入审计。首次CPU导出因MANO挂载布局缺models/MANO_LEFT.pkl失败，交原子代理修正并继续实际导出；未将输入审计通过误报为已有物体rollout。后续不继承public44的release407或锅支撑配置。
+- 新hand-reconstruction-audit-20261029-001完成249帧双手原始MANO投影/轮廓审计及关键帧RGB/MANO/机器人IK对照。两手249帧observed只是完整性；同pipeline mask代理IoU左中位.7407、右.6945，不能视为独立GT准确率。源0.4秒右拇指明显错位、11.95秒张手指尖/掌部不齐，表明存在重定向之前的局部误差；源8.4秒右拇指存在且大致对齐，不能把实际策略不参与全部归咎重建。
+- 腕局部最大单帧指尖位移左209→210约103mm、右拇指210→211约59mm；仅标记动态异常候选，快速真实张手与模糊仍需区分。输入/基线未修改，自然抓握仍不作为比赛主线前置门槛。SwanLab5092和TensorBoard6006实测HTTP200，既有loss/评估曲线保留。
+- 更新：episode37已完成真实CPU桥接episode37-bridge-004、官方IK episode37-official-001及scene-001导出（151帧）；前三次依赖/挂载失败收据保留。修复ExperimentSpec的硬编码episode身份，新增显式episode_id并用于gate和launch记录，兼容历史public44默认；37必须按真实ID验证。相关40测试通过、2可选项跳过。源RGB/MANO全片对照已生成并完整解码验收（249帧20Hz）；GPU当前其它评测作业占用约38GB，未启动冲突训练。

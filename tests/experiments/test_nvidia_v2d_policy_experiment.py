@@ -185,3 +185,21 @@ def test_upstream_zero_decay_removes_reset_boost_and_keeps_curriculum_target(tar
     )
     assert np.allclose(applied.numpy(), target)
     assert frame.numpy().tolist() == [1]
+
+
+def test_explicit_episode_identity_reaches_gate(monkeypatch):
+    from experiments.nvidia_v2d.policy_experiment import require_experiment_gate
+    seen = []
+
+    def verify(path, **kwargs):
+        seen.append(kwargs['episode_id'])
+        if kwargs['episode_id'] != 'track_3-evaluation-episode-000037':
+            raise ValueError('gate视频编号不一致')
+        return {'training_ready': True}
+
+    monkeypatch.setattr('experiments.nvidia_v2d.policy_gate.verify_gate', verify)
+    spec = sample_spec(episode_id='track_3-evaluation-episode-000037')
+    assert require_experiment_gate(spec)['training_ready']
+    assert seen == ['track_3-evaluation-episode-000037']
+    with pytest.raises(ValueError, match='视频编号'):
+        require_experiment_gate(sample_spec())

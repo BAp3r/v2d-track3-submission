@@ -62,6 +62,7 @@ CODE_FILES = (
 
 class ExperimentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    episode_id: str = Field(default="track_3-public-episode-000044", min_length=1)
     backend: Literal["official", "dexpilot", "multitip"]
     parquet: Path
     gate: Path
@@ -229,7 +230,7 @@ def require_experiment_gate(spec: ExperimentSpec) -> dict[str, Any]:
         spec.gate,
         backend=spec.backend,
         parquet=spec.parquet,
-        episode_id="track_3-public-episode-000044",
+        episode_id=spec.episode_id,
     )
 
 
@@ -475,7 +476,7 @@ def launch(spec_path: Path, output: Path, cache: Path, repository: Path, input_r
     args = docker_argv(spec, spec_path, output, cache, repository, input_root)
     run = RunSpec(
         phase="training",
-        episode_id="track_3-public-episode-000044",
+        episode_id=spec.episode_id,
         backend=spec.backend,
         argv=args,
         cwd=repository,
