@@ -709,3 +709,4 @@
 - 新hand-reconstruction-audit-20261029-001完成249帧双手原始MANO投影/轮廓审计及关键帧RGB/MANO/机器人IK对照。两手249帧observed只是完整性；同pipeline mask代理IoU左中位.7407、右.6945，不能视为独立GT准确率。源0.4秒右拇指明显错位、11.95秒张手指尖/掌部不齐，表明存在重定向之前的局部误差；源8.4秒右拇指存在且大致对齐，不能把实际策略不参与全部归咎重建。
 - 腕局部最大单帧指尖位移左209→210约103mm、右拇指210→211约59mm；仅标记动态异常候选，快速真实张手与模糊仍需区分。输入/基线未修改，自然抓握仍不作为比赛主线前置门槛。SwanLab5092和TensorBoard6006实测HTTP200，既有loss/评估曲线保留。
 - 更新：episode37已完成真实CPU桥接episode37-bridge-004、官方IK episode37-official-001及scene-001导出（151帧）；前三次依赖/挂载失败收据保留。修复ExperimentSpec的硬编码episode身份，新增显式episode_id并用于gate和launch记录，兼容历史public44默认；37必须按真实ID验证。相关40测试通过、2可选项跳过。源RGB/MANO全片对照已生成并完整解码验收（249帧20Hz）；GPU当前其它评测作业占用约38GB，未启动冲突训练。
+- episode37 CPU最终产物改为official-002、training-gate-002、scene-002（以browser-submission目录EPISODE37_READY.md为准）；新显式episode身份入口实际验证通过，绑定10份文件哈希。训练配置已保存2097152步/256world/seed42/native speed1/world0评估。仍未开训、无actual rollout：还需整合runtime-assets/upstream只读挂载与双监控启动器，并避开当前GPU其它任务；全20集有效提交仍缺，未对外上传。不要把CPU就绪当作正式提交或无辅助成功。
