@@ -19,6 +19,12 @@ diagnostic.metrics.json. A SUCCESS label requires captured
 reference_tracking_criteria plus completion_step, completion_terminated,
 completion_truncated and completion_reference_progress arrays, one item per
 world. Missing evidence remains UNVERIFIED; aggregate SR never assigns worlds.
+Time labels prefer captured ``reference_source_time_s`` with verified
+``reference_timing`` metadata. Older captures can recover time from their source
+parquet only after its interpolated wrists/object positions match the capture.
+Otherwise labels explicitly say nominal progress, not source time. A render
+freezes ``timeline.json`` for its plotting subprocess; standalone ``plot`` can
+reuse it with ``--timeline /path/to/timeline.json``. No simulator import is used.
 Use --selection-post-hoc and --selection-note to document any post-hoc choice. Omit --diagnostic only for
 the original four-case comparison, whose world11 choice was post-hoc.
 """
@@ -45,6 +51,7 @@ CASES = (
 COLORS = ("#a76565", "#7f90a6", "#d5a03e", "#2694bc")
 ERROR_NAMES = ("wrist_position_m", "wrist_orientation_rad", "object_position_m", "object_orientation_rad")
 COMPLETION_FIELDS = ("completion_step", "completion_terminated", "completion_truncated", "completion_reference_progress")
+PLAYBACK_METHOD = "flash_chord.data.resampling.playback_times"
 
 
 def sha256(path: Path) -> str:
@@ -60,6 +67,107 @@ def orientation_error(actual: np.ndarray, reference: np.ndarray) -> np.ndarray:
     reference = reference / np.linalg.norm(reference, axis=-1, keepdims=True)
     dot = np.abs(np.sum(actual * reference, axis=-1))
     return 2 * np.arccos(np.clip(dot, 0, 1))
+
+
+def playback_reference_times(source_count, source_fps, control_fps, motion_speed):
+    """Mirror the frozen runtime API; speed1 uses arange+clip, others linspace.
+
+    Source count is the nested object-position array length, not parquet row count.
+    This helper alone does not establish provenance: callers must bind metadata
+    to a runtime capture or verify interpolated source positions against it.
+    """
+    if (isinstance(source_count, bool) or int(source_count) != source_count or source_count < 2
+            or not np.isfinite([source_fps, control_fps, motion_speed]).all()
+            or min(source_fps, control_fps, motion_speed) <= 0):
+        raise ValueError("invalid reference timing metadata")
+    duration = (source_count - 1) / source_fps
+    if motion_speed == 1:
+        count = round(duration * control_fps) + 1
+        return np.clip(np.arange(count, dtype=float) / control_fps, 0, duration)
+    count = int(duration * control_fps / motion_speed)
+    if count < 2:
+        raise ValueError("reference timing has fewer than two samples")
+    return np.linspace(0, duration, count)
+
+
+def reference_timeline(data, manifest, report, root):
+    """Return (timestamps, provenance, additional input hashes), without guessing exact time."""
+    steps = len(data["reference_pose_w"])
+    fps = float(manifest["fps"])
+    speed = float(manifest.get("motion_speed_override") or 1)
+    nominal = np.arange(steps) * speed / fps
+
+    def fallback(reason):
+        return nominal, {"verified": False, "method": "nominal_control_progress",
+                         "reason": reason, "label": "Nominal progress (not verified source time)"}, {}
+
+    if "reference_source_time_s" in data:
+        metadata = dict(manifest.get("reference_timing") or {})
+        required = ("source_path", "source_fps", "source_frame_count", "control_fps", "motion_speed")
+        if (metadata.get("verified") is not True or metadata.get("method") != PLAYBACK_METHOD
+                or any(key not in metadata for key in required)):
+            raise ValueError("captured reference timestamps lack verified runtime timing provenance")
+        values = np.asarray(data["reference_source_time_s"], dtype=float)
+        expected = playback_reference_times(metadata["source_frame_count"], metadata["source_fps"],
+                                            metadata["control_fps"], metadata["motion_speed"])
+        if (values.shape != (steps,) or len(expected) != steps or not np.isfinite(values).all()
+                or np.any(np.diff(values) <= 0) or metadata["control_fps"] != fps
+                or not np.allclose(values, expected, rtol=0, atol=1e-12)):
+            raise ValueError("captured reference timestamps disagree with runtime timing metadata")
+        metadata.update(label="Verified source reference time", origin="captured_runtime_array")
+        return values, metadata, {}
+
+    path_text = report.get("parquet")
+    if not path_text:
+        return fallback("capture has no reference timestamp array or source parquet path")
+    source_path = Path(path_text)
+    # This repository migrated this exact legacy mount into the experiment root.
+    legacy_mount = Path("/var/tmp/fmc3-sharpa-validation-20261027-001")
+    if source_path.is_relative_to(legacy_mount):
+        migrated = root / "inputs/legacy" / source_path.relative_to(legacy_mount)
+        if migrated.is_file():
+            source_path = migrated
+    if not source_path.is_file():
+        return fallback("recorded source parquet is unavailable")
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return fallback("pyarrow unavailable; source input cannot be verified in this Python")
+    cells = pq.read_table(source_path).to_pylist()
+    if len(cells) != 1:
+        return fallback("source schema is not the single-row ManoSharpa reference")
+    cells = cells[0]
+    required = ("fps", "object_body_position", "robot_left_wrist_position", "robot_right_wrist_position")
+    if any(key not in cells for key in required) or any(f"reference_{side}_wrist" not in data for side in ("left", "right")):
+        return fallback("source/capture lacks positions needed to verify reference timing")
+    count, source_fps = len(cells["object_body_position"]), float(cells["fps"])
+    values = playback_reference_times(count, source_fps, fps, speed)
+    if len(values) != steps:
+        return fallback("source metadata does not reproduce captured reference length")
+    original = np.arange(count) / source_fps
+    for raw, captured in [(cells["object_body_position"], data["reference_pose_w"][..., :3]),
+                           *[(cells[f"robot_{side}_wrist_position"], data[f"reference_{side}_wrist"]) for side in ("left", "right")]]:
+        raw = np.asarray(raw, dtype=float)
+        flat = raw.reshape(count, -1)
+        interpolated = np.stack([np.interp(values, original, column) for column in flat.T], axis=-1)
+        interpolated = interpolated.reshape((steps, *raw.shape[1:]))
+        if interpolated.shape != np.asarray(captured).shape or not np.allclose(interpolated, captured, rtol=0, atol=1e-8):
+            return fallback("source interpolation does not match captured reference positions")
+    digest = sha256(source_path)
+    return values, {"verified": True, "method": PLAYBACK_METHOD, "origin": "source_parquet_verified_against_capture",
+                    "source_path": str(source_path.resolve()), "recorded_source_path": path_text, "source_sha256": digest,
+                    "source_fps": source_fps, "source_frame_count": count, "control_fps": fps, "motion_speed": speed,
+                    "position_match_atol_m": 1e-8, "label": "Verified source reference time"}, {str(source_path.resolve()): digest}
+
+
+def validate_timeline_record(record, capture_hash, steps):
+    """Reuse the rendering process's proven timeline in a different plotting Python."""
+    if record.get("capture_npz_sha256") != capture_hash:
+        raise ValueError("timeline belongs to a different capture")
+    values = np.asarray(record["timestamps_s"], dtype=float)
+    if values.shape != (steps,) or not np.isfinite(values).all() or np.any(np.diff(values) <= 0):
+        raise ValueError("invalid frozen timeline")
+    return values, record["provenance"]
 
 
 def per_world_outcomes(data, manifest, report):
@@ -154,9 +262,10 @@ def controller_label(manifest):
     return "reference-diagnostic", "Reference diagnostic / 零残差参考诊断（非学习策略）", False
 
 
-def load_cases(root: Path, diagnostic: Path | None = None, world: int = 0):
+def load_cases(root: Path, diagnostic: Path | None = None, world: int = 0, timeline: Path | None = None):
     cases = []
     hashes = {}
+    frozen_timelines = json.loads(timeline.read_text()) if timeline is not None else None
     descriptions = CASES if diagnostic is None else ((str(diagnostic.resolve()), diagnostic.parent.name, world),)
     for directory, title, selected in descriptions:
         folder = root / directory / "result" if diagnostic is None else Path(directory)
@@ -176,13 +285,21 @@ def load_cases(root: Path, diagnostic: Path | None = None, world: int = 0):
         if not 0 <= selected < actual.shape[1]:
             raise ValueError("selected world is outside the captured cohort")
         reference = data["reference_pose_w"][:, None, 0]
-        speed = manifest.get("motion_speed_override") or 1.0
-        times = np.arange(len(actual)) * speed / manifest["fps"]
+        if frozen_timelines is None:
+            times, timing, timing_hashes = reference_timeline(data, manifest, metrics, root)
+            hashes.update(timing_hashes)
+        else:
+            times, timing = validate_timeline_record(frozen_timelines[directory], sha256(folder / "diagnostic.npz"), len(actual))
         errors = actual[..., :3] - reference[..., :3]
         orientations = orientation_error(actual[..., 3:], reference[..., 3:])
         # The simulator's recorded diagnostic is the authority for gate crossing.
         # Independently recomputed pose errors must agree before we visualize them.
-        np.testing.assert_allclose(np.linalg.norm(errors, axis=-1), data["tracking_error"][..., 2], atol=2e-6)
+        # Float32 subtraction/norm reductions can differ by a few rounding units,
+        # especially in failed worlds hundreds of metres from the reference.
+        # This tolerance only verifies the capture; per_world_outcomes still uses
+        # the original recorded tracking_error and its unchanged strict thresholds.
+        np.testing.assert_allclose(np.linalg.norm(errors, axis=-1), data["tracking_error"][..., 2],
+                                   rtol=4 * np.finfo(np.float32).eps, atol=2e-6)
         np.testing.assert_allclose(orientations, data["tracking_error"][..., 3], atol=2e-3)
         scales = np.asarray(data["auxiliary_scales"])
         if scales.shape != (len(actual), 2) or not np.isfinite(scales).all() or np.any(scales):
@@ -193,8 +310,11 @@ def load_cases(root: Path, diagnostic: Path | None = None, world: int = 0):
         _, controller, learned = controller_label(manifest)
         if diagnostic is not None:
             title = f"{controller.split(' / ')[0]} / world{selected} / {outcomes[selected]['status']}"
+        if not timing["verified"]:
+            title += " / nominal time only"
         cases.append({"directory": directory, "title": title, "selected_world": selected,
-                      "data": data, "manifest": manifest, "metrics": metrics, "times": times,
+                      "data": data, "manifest": manifest, "metrics": metrics, "times": times, "timing": timing,
+                      "capture_npz_sha256": sha256(folder / "diagnostic.npz"),
                       "xyz_error": errors, "orientation_error": orientations, "object_body": object_body,
                       "outcomes": outcomes, "criteria": criteria, "learned_policy": learned})
     return cases, hashes
@@ -230,9 +350,12 @@ def statistics(cases):
                 "object_max_lift_from_reset_m": max(0.0, maximum_recorded_lift),
                 "object_max_signed_after_step_z_relative_reset_m": maximum_recorded_lift,
                 "contact_steps": int(np.count_nonzero(counts[:, world])),
-                "first_object_position_failure_source_s": first_above(tracking[:, 2], 2),
-                "first_object_orientation_failure_source_s": first_above(tracking[:, 3], 3),
-                "first_wrist_failure_source_s": first_above(tracking[:, 0], 0),
+                "first_object_position_failure_source_s": first_above(tracking[:, 2], 2) if case["timing"]["verified"] else None,
+                "first_object_orientation_failure_source_s": first_above(tracking[:, 3], 3) if case["timing"]["verified"] else None,
+                "first_wrist_failure_source_s": first_above(tracking[:, 0], 0) if case["timing"]["verified"] else None,
+                "timeline_verified": case["timing"]["verified"], "timeline_method": case["timing"]["method"],
+                "first_failure_nominal_s": (case["outcomes"][world]["first_failure_step"] * (case["manifest"].get("motion_speed_override") or 1) / case["manifest"]["fps"]
+                                            if case["outcomes"][world]["first_failure_step"] is not None else None),
                 "full_sequence_tracking_success": case["outcomes"][world]["success"],
                 "outcome_status": case["outcomes"][world]["status"],
                 "completion_verified": case["outcomes"][world]["completion_verified"],
@@ -242,12 +365,12 @@ def statistics(cases):
     return rows
 
 
-def plot(root: Path, output: Path, diagnostic: Path | None = None, world: int = 0):
+def plot(root: Path, output: Path, diagnostic: Path | None = None, world: int = 0, timeline: Path | None = None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    cases, _ = load_cases(root, diagnostic, world)
+    cases, _ = load_cases(root, diagnostic, world, timeline)
     figure, axes = plt.subplots(3, 2, figsize=(15, 11), sharex=True, layout="constrained")
     labels = ["Object X error (cm)", "Object Y error (cm)", "Object Z error (cm)",
               "Object orientation error (degrees)", "Maximum wrist position error (cm)",
@@ -276,7 +399,8 @@ def plot(root: Path, output: Path, diagnostic: Path | None = None, world: int = 
         axis.grid(alpha=.22)
         axis.set_xlim(0, max(case["times"][-1] for case in cases))
     for axis in axes[-1]:
-        axis.set_xlabel("Source reference time (s); simulation time depends on recorded motion speed")
+        axis.set_xlabel("Verified source reference time (s)" if all(case["timing"]["verified"] for case in cases)
+                        else "Time (s): source time only for verified cases; otherwise nominal progress")
     axes.flat[0].legend(fontsize=8, loc="upper left")
     axes.flat[3].legend(fontsize=8, loc="upper left")
     axes.flat[4].legend(fontsize=8, loc="upper left")
@@ -325,7 +449,7 @@ def plot(root: Path, output: Path, diagnostic: Path | None = None, world: int = 
 
 def render(root: Path, output: Path, assets: Path, plot_python: Path,
            diagnostic: Path | None = None, world: int = 0, selection_note: str | None = None,
-           selection_post_hoc: bool = False):
+           selection_post_hoc: bool = False, display_note: str | None = None):
     import trimesh
     from PIL import Image, ImageDraw, ImageFont
     from scipy.spatial.transform import Rotation
@@ -335,6 +459,9 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
     hashes[str(Path(__file__).resolve())] = sha256(Path(__file__))
     shutil.copy2(Path(__file__), output / "frozen-renderer.py")
     selected = cases[-1]
+    timeline_path = output / "timeline.json"
+    timeline_path.write_text(json.dumps({case["directory"]: {"capture_npz_sha256": case["capture_npz_sha256"],
+                                "timestamps_s": case["times"].tolist(), "provenance": case["timing"]} for case in cases}, indent=2) + "\n")
     selected_world = selected["selected_world"]
     outcome = selected["outcomes"][selected_world]
     controller_type, controller, learned = controller_label(selected["manifest"])
@@ -462,6 +589,10 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
         return image
 
     video = output / f"{controller_type}-world{selected_world}-{status}.mp4"
+    rgb_paths = sorted((root / "inputs/public44-source/job/reconstruction/frames").glob("[0-9][0-9][0-9][0-9][0-9][0-9].png"))
+    source_fps = selected["timing"].get("source_fps", 20)
+    if not rgb_paths or (selected["timing"]["verified"] and selected["timing"]["source_frame_count"] != len(rgb_paths)):
+        raise ValueError("source reference frame count does not match the RGB frame bundle")
     cmd = ["ffmpeg", "-v", "error", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "1600x740",
            "-framerate", str(fps), "-i", "pipe:0", "-an", "-c:v", "libx264", "-preset", "fast", "-crf", "20",
            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(video)]
@@ -472,8 +603,8 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
     saved = []
     try:
         for frame, seconds in enumerate(selected["times"]):
-            source_frame = int(np.clip(np.floor(seconds * 20 + .5), 0, 248))
-            raw_path = root / "inputs/public44-source/job/reconstruction/frames" / f"{source_frame:06d}.png"
+            source_frame = int(np.clip(np.floor(seconds * source_fps + .5), 0, len(rgb_paths) - 1))
+            raw_path = rgb_paths[source_frame]
             if str(raw_path.resolve()) not in hashes:
                 hashes[str(raw_path.resolve())] = sha256(raw_path)
             with Image.open(raw_path) as source:
@@ -485,8 +616,10 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
             draw = ImageDraw.Draw(board)
             title_color = (133, 230, 166) if status == "SUCCESS" else (255, 151, 145) if status == "FAILED" else (250, 208, 112)
             draw.text((16, 8), f"{status_caption} | {controller} | {selection_prefix} world {selected_world} / 共{selected['manifest']['world_count']}组（0起始编号）", font=font, fill=title_color)
-            draw.text((16, 42), f"源参考 {seconds:.3f}s / 仿真 {(frame + 1) / fps:.2f}s | {speed:g}倍 | 帧 {frame + 1}/{steps} | {cohort_summary} | 物体辅助=0", font=small, fill="white")
-            draw.text((16, 73), f"原始RGB · 最近源帧 {source_frame}", font=small, fill=(220, 228, 239))
+            time_label = "已验证源参考" if selected["timing"]["verified"] else "名义进度（非源时间）"
+            draw.text((16, 42), f"{time_label} {seconds:.3f}s / 仿真 {(frame + 1) / fps:.2f}s | {speed:g}倍 | 帧 {frame + 1}/{steps} | {cohort_summary} | 物体辅助=0", font=small, fill="white")
+            rgb_label = "最近源帧" if selected["timing"]["verified"] else "估算帧（时间未验证）"
+            draw.text((16, 73), f"原始RGB · {rgb_label} {source_frame}", font=small, fill=(220, 228, 239))
             gain = selected["manifest"].get("wrist_gain_ablation")
             scene_label = "实际逐步机器人/物体状态"
             if gain:
@@ -501,7 +634,7 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
             orientation_limit = f"{np.rad2deg(limits[3]):.1f}°" if limits[3] is not None else "停用"
             draw.text((16, 684), f"误差：物体位置 {errors[2] * 100:.2f}cm（阈值{position_limit}）；姿态 {np.rad2deg(errors[3]):.1f}°（阈值{orientation_limit}）；腕位 {errors[0] * 100:.2f}cm", font=small, fill="white")
             explanation = ("已越任务阈值；保留完整轨迹。" if failed else "本环境完整动作最终通过所记录任务判据。" if status == "SUCCESS" else "本环境完整动作最终失败。" if status == "FAILED" else "缺逐环境完成/判据凭据，不能声称成功。")
-            draw.text((16, 710), explanation + "其他环境见all-worlds；机器人显示为连杆凸包；桌面高度/厚度为近似。", font=small, fill=(189, 203, 224))
+            draw.text((16, 710), (display_note or explanation) + " 连杆凸包显示；桌面高度/厚度为近似。", font=small, fill=(189, 203, 224))
             writer.stdin.write(np.asarray(board).tobytes())
             if frame in keyframes:
                 path = output / f"keyframe-{frame:03d}.jpg"
@@ -520,6 +653,7 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
     assert probe["streams"][0]["nb_frames"] == str(steps)
     plot_environment = {**os.environ, "MPLCONFIGDIR": str(output / "matplotlib-cache")}
     plot_command = [str(plot_python), str(Path(__file__).resolve()), "plot", "--root", str(root), "--output", str(output)]
+    plot_command.extend(["--timeline", str(timeline_path)])
     if diagnostic is not None:
         plot_command.extend(["--diagnostic", str(diagnostic), "--world", str(selected_world)])
     subprocess.run(plot_command, check=True, env=plot_environment)
@@ -529,6 +663,7 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
     manifest = {"schema": "nvidia_v2d.diagnostic_visuals.v2", "claim": controller,
                 "selection": selection, "learned_policy": learned, "selected_world_outcome": outcome,
                 "selection_post_hoc": selection_post_hoc,
+                "display_note": display_note,
                 "policy_unassisted_success": bool(learned and outcome["success"] is True),
                 "cohort_metrics": {"verified_chord_successful_worlds": successful_worlds,
                                    "world_count": selected["manifest"]["world_count"],
@@ -536,7 +671,10 @@ def render(root: Path, output: Path, assets: Path, plot_python: Path,
                                    "reported_maniptrans_sr": maniptrans_sr},
                 "all_world_outcomes": selected["outcomes"],
                 "selected_case": selected["directory"], "selected_world": selected_world, "frames": steps, "fps": fps,
-                "playback": f"{fps:g}fps simulator time; each pose is post-step; source-reference target time at speed{speed:g}; nearest source RGB frame",
+                "playback": f"{fps:g}fps simulator time; each pose is post-step; {selected['timing']['label']}; nearest or explicitly estimated source RGB frame",
+                "reference_timing": selected["timing"], "timeline_file": timeline_path.name,
+                "rgb_frame_selection": {"fps": source_fps, "frame_count": len(rgb_paths),
+                                        "verified_source_timestamps": selected["timing"]["verified"]},
                 "lift_metric": "maximum over reset and recorded steps relative to actual reset Z; signed after-step maximum also retained",
                 "object_pose_matches_recorded_body_pose_exactly": True, "auxiliary_scale_max": 0,
                 "reference_tracking_criteria": selected["criteria"],
@@ -560,18 +698,20 @@ def main():
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--plot-python", type=Path)
     parser.add_argument("--diagnostic", type=Path, help="One result directory containing diagnostic.npz/manifest/metrics; omit for the legacy four-case comparison")
+    parser.add_argument("--timeline", type=Path, help="plot only: reuse a render's capture-bound timeline.json across Python environments")
     parser.add_argument("--world", type=int, default=0, help="Explicit captured world index; no automatic success selection")
     parser.add_argument("--selection-note", help="Explain any post-hoc selection; recorded in the output manifest")
     parser.add_argument("--selection-post-hoc", action="store_true", help="Explicitly label a world selected after examining outcomes")
+    parser.add_argument("--display-note", help="Short visible caption documenting selection/release qualifications; also saved in manifest")
     args = parser.parse_args()
     if args.mode == "plot":
-        plot(args.root, args.output, args.diagnostic, args.world)
+        plot(args.root, args.output, args.diagnostic, args.world, args.timeline)
     else:
         if args.assets is None or args.plot_python is None:
             parser.error("render requires --assets and --plot-python")
         render(args.root.resolve(), args.output.resolve(), args.assets.resolve(), args.plot_python.resolve(),
                args.diagnostic.resolve() if args.diagnostic else None, args.world, args.selection_note,
-               args.selection_post_hoc)
+               args.selection_post_hoc, args.display_note)
 
 
 if __name__ == "__main__":

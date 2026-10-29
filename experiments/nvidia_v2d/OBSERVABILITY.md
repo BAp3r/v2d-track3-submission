@@ -36,6 +36,10 @@ sidecar 不读取、写入或打印凭据。`check` 只验证依赖；在线认�
 SwanLab SDK 不提供覆盖事件时间的接口，原始时间另存为
 `observability/source_wall_time_unix`，SwanLab 原生事件时间是导入时间。
 
+预热时上游会记录 loss=0，但此时没有优化器更新，不能解释为零误差或已经收敛。
+需同时查看 `replay/size_transitions` 与本轮 `replay_minimum`。例如 006 的 fresh replay
+最小值为131072，前513次采集未更新，第514次才开始；真实更新计数另由 checkpoint 审计核对。
+
 ## 完整性与退出
 
 ready 代表依赖和文件追踪已准备，SDK run 在第一条指标时初始化。发现 `execution.json`

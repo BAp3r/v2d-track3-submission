@@ -102,6 +102,9 @@ def main() -> None:
     feedback_data = {}
 
     def recording(env, jax_env, policy_action, *positional, **kwargs):
+        import pyarrow.parquet as pq
+        from flash_chord.data.resampling import lerp, playback_times
+
         model = env.scene.model
         count = model.body_count // env.world_count
         labels = list(model.body_label[:count])
@@ -111,6 +114,26 @@ def main() -> None:
                         body_count=count, world_count=env.world_count,
                         fps=float(env.config.sim.fps), action_dimension=env.action.action_dim)
         metadata["body_mass_kg"] = model.body_mass.numpy().reshape(env.world_count, count).tolist()
+        source_path = Path(reference.metadata.source_path)
+        # ManoSharpa parquet has one nested row; num_rows is not the frame count.
+        raw_object_positions = np.asarray(pq.read_table(
+            source_path, columns=["object_body_position"])["object_body_position"][0].as_py())
+        source_fps = float(reference.metadata.source_fps)
+        motion_speed = args.motion_speed or float(checkpoint_config["task"]["motion_speed"])
+        source_times, reference_times = playback_times(
+            len(raw_object_positions), source_fps, float(reference.fps), motion_speed)
+        if (len(reference_times) != reference.num_frames or not np.allclose(
+                lerp(raw_object_positions, source_times, reference_times),
+                np.asarray(reference.object_body_pos_w()), rtol=1e-6, atol=1e-6)):
+            raise ValueError("capture source timeline does not match the actual object reference")
+        feedback_data["reference_source_time_s"] = reference_times
+        metadata["reference_timing"] = {
+            "method": "flash_chord.data.resampling.playback_times", "verified": True,
+            "source_path": str(source_path), "source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "source_fps": source_fps, "source_frame_count": len(raw_object_positions),
+            "control_fps": float(reference.fps), "motion_speed": motion_speed,
+            "validation": "full-sequence source object positions interpolate to actual runtime reference",
+        }
         initial["body_pose"] = env.state_0.body_q.numpy().reshape(env.world_count, count, 7).copy()
         for side in ("left", "right"):
             reference_wrists[side] = np.asarray(reference.wrist_pos_w(side)).copy()
@@ -146,6 +169,7 @@ def main() -> None:
                 "force_convention": "force/torque act on shape0; reaction on shape1 is negative",
                 "gap_convention": "signed normal separation; negative is penetration",
                 "force_attribute_present": getattr(env.contacts, "force", None) is not None,
+                "force_validation": "raw last-substep snapshot; absolute force/impulse not independently validated",
                 "shape_labels": list(model.shape_label),
                 "shape_body_ids": model.shape_body.numpy().tolist(),
                 "layout": asdict(layout),
