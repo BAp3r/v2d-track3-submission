@@ -1,0 +1,6 @@
+# Exact versions used by the host bridge for adapter boundary models.
+annotated-types==0.8.0
+pydantic==2.11.9
+pydantic-core==2.33.2
+typing-extensions==4.16.0
+typing-inspection==0.4.4

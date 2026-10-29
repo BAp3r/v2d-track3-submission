@@ -1,0 +1,8 @@
+{
+  "source_repository": "http://192.168.1.123:3000/shenjiahao/Dex_teleop_demo",
+  "source_commit": "41efca631a91902c47da222eeaad81022e52220b",
+  "source_path": "src/dex_teleop_demo/multitip_optimizer.py",
+  "sha256": "d481806a25ead89e4e87877aeb8b5950f9c5273cd374010b301b6146569964bc",
+  "modifications": [],
+  "license_notice": "Source file contains no explicit license header; user authorized reuse within this project. No additional license granted."
+}

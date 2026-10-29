@@ -1,0 +1,4 @@
+# CPU-only host sidecar. Keep these outside the frozen GPU training image.
+swanlab[dashboard]==0.10.3
+tensorboard==2.21.0
+tensorboardX==2.6.5
