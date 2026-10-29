@@ -53,6 +53,44 @@ def test_explicit_resume_requires_optimizer_and_replay_state(tmp_path):
     assert "training.checkpoint.load_replay_path='/archive/replay_256.safetensors'" in args
 
 
+def test_release_ablation_keeps_original_task_and_requires_real_penalty(tmp_path):
+    with pytest.raises(ValueError, match="negative contact penalty"):
+        make_spec(tmp_path, release_start_frame=407, unintended_contact_weight=0)
+    with pytest.raises(ValueError):
+        make_spec(tmp_path, release_start_frame=407.5)
+    spec = make_spec(tmp_path, release_start_frame=407, unintended_contact_weight=-10)
+    args = physical_training_overrides(spec, Path("/run"))
+    assert "+objective.release_start_frame=407" in args
+    assert "objective._target_=experiments.nvidia_v2d.release_contact_objective.make_release_contact_objective" in args
+    assert "task.motion_start_frame=0" in args and "task.motion_end_frame=-1" in args
+    assert not any(arg.startswith("termination.") for arg in args)
+
+
+def test_wrist_bound_changes_action_space_without_relaxing_force_or_criteria(tmp_path):
+    spec = make_spec(tmp_path, wrist_pos_clip=0.075)
+    args = physical_training_overrides(spec, Path("/run"))
+    assert "action.wrist_pos_clip=0.075" in args
+    assert not any(arg.startswith(("termination.", "action.wrist_tau_max=")) for arg in args)
+    for bad in [0, 0.3, float("nan")]:
+        with pytest.raises(ValueError):
+            make_spec(tmp_path, wrist_pos_clip=bad)
+
+
+def test_changed_reward_can_explicitly_resume_with_fresh_replay(tmp_path):
+    state = Path("/archive/state_2621440.safetensors")
+    spec = make_spec(tmp_path, resume_checkpoint=state, reset_replay=True,
+                     replay_capacity=262144, replay_minimum=131072)
+    args = physical_training_overrides(spec, Path("/run"))
+    assert "training.resume=true" in args
+    assert "training.checkpoint.load_replay_path=null" in args
+    assert "training.replay.minimum_size=131072" in args
+    with pytest.raises(ValueError, match="no old replay"):
+        make_spec(tmp_path, resume_checkpoint=state, reset_replay=True,
+                  resume_replay=Path("/archive/replay_2621440.safetensors"))
+    with pytest.raises(ValueError, match="state checkpoint"):
+        make_spec(tmp_path, reset_replay=True)
+
+
 def install_fake_setup(monkeypatch):
     package = ModuleType("flash_chord")
     scene = ModuleType("flash_chord.scene")

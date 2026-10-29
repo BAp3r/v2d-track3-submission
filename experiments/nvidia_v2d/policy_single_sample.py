@@ -37,7 +37,8 @@ from experiments.nvidia_v2d.policy_experiment import (
 
 LEGACY_ROOT = Path("/var/tmp/fmc3-sharpa-validation-20261027-001")
 FROZEN_IMAGE = "sha256:7fdce3ad594fbad8b5983fde7846908be2ed6179ba4ebcfd1edefbcbcf4c628c"
-SOURCE_FILES = (*CODE_FILES, "policy_single_sample.py", "physical_wrist_config.py")
+SOURCE_FILES = (*CODE_FILES, "policy_single_sample.py", "physical_wrist_config.py",
+                "release_contact_objective.py", "policy_replay_contract.py")
 
 
 class SingleSampleSpec(ExperimentSpec):
@@ -58,20 +59,27 @@ class SingleSampleSpec(ExperimentSpec):
     checkpoint_interval: int | None = Field(default=None, gt=0)
     wrist_kp: float | None = Field(default=None, ge=25, le=200, allow_inf_nan=False)
     wrist_kd: float | None = Field(default=None, ge=6, le=25, allow_inf_nan=False)
+    wrist_pos_clip: float | None = Field(default=None, ge=0.05, le=0.2, allow_inf_nan=False)
     unintended_contact_weight: float = Field(default=-10.0, ge=-10, le=0, allow_inf_nan=False)
+    release_start_frame: int | None = Field(default=None, ge=0, strict=True)
     always_reset_to_first_frame: bool = False
     resume_checkpoint: Path | None = None
     resume_replay: Path | None = None
+    reset_replay: bool = False
 
     @model_validator(mode="after")
     def physical_contract(self) -> SingleSampleSpec:
         if (self.wrist_kp is None) != (self.wrist_kd is None):
             raise ValueError("wrist gain ablation requires both kp and kd")
+        if self.release_start_frame is not None and self.unintended_contact_weight >= 0:
+            raise ValueError("release contact objective requires a negative contact penalty")
         if self.backend not in ("official", "multitip"):
             raise ValueError("backend must be official or multitip")
         if self.verify_resume:
             raise ValueError("use explicit resume_checkpoint and resume_replay")
-        if (self.resume_checkpoint is None) != (self.resume_replay is None):
+        if self.reset_replay and (self.resume_checkpoint is None or self.resume_replay is not None):
+            raise ValueError("reset_replay requires a state checkpoint and no old replay path")
+        if not self.reset_replay and (self.resume_checkpoint is None) != (self.resume_replay is None):
             raise ValueError("resume requires both a training-state checkpoint and replay")
         if self.resume_checkpoint is not None and not self.resume_checkpoint.name.startswith("state_"):
             raise ValueError("resuming optimization requires state_*.safetensors, not policy weights")
@@ -105,13 +113,21 @@ def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[st
             "embodiment.config._target_=experiments.nvidia_v2d.physical_wrist_config.make_sharpa_config",
             f"+embodiment.config.kp={spec.wrist_kp}", f"+embodiment.config.kd={spec.wrist_kd}",
         ])
+    if spec.wrist_pos_clip is not None:
+        args.append(f"action.wrist_pos_clip={spec.wrist_pos_clip}")
     if spec.unintended_contact_weight != -10:
         args.append(f"objective.unintended_contact.weight={spec.unintended_contact_weight}")
         args.extend(f"curriculum.stages.{i}.objective_weights.unintended_contact={spec.unintended_contact_weight}"
                     for i in range(len(THRESHOLDS)))
+    if spec.release_start_frame is not None:
+        args.extend([
+            "objective._target_=experiments.nvidia_v2d.release_contact_objective.make_release_contact_objective",
+            f"+objective.release_start_frame={spec.release_start_frame}",
+        ])
     if spec.resume_checkpoint is not None:
-        args.extend(["training.resume=true", f"training.checkpoint_path='{spec.resume_checkpoint}'",
-                     f"training.checkpoint.load_replay_path='{spec.resume_replay}'"])
+        args.extend(["training.resume=true", f"training.checkpoint_path='{spec.resume_checkpoint}'"])
+        args.append("training.checkpoint.load_replay_path=null" if spec.reset_replay else
+                    f"training.checkpoint.load_replay_path='{spec.resume_replay}'")
     return args
 
 
@@ -148,10 +164,20 @@ def explicit_support(spec: SingleSampleSpec) -> Iterator[dict[str, Any]]:
 
 def train(spec: SingleSampleSpec, output: Path) -> None:
     from experiments.nvidia_v2d import policy_metric_logging
+    from experiments.nvidia_v2d.policy_replay_contract import (
+        require_replay_compatibility,
+    )
 
     require_experiment_gate(spec)
+    saved_config = {}
+    if spec.resume_checkpoint is not None:
+        from flash_chord.training.checkpoint import read_checkpoint_metadata
+
+        saved_config = json.loads(read_checkpoint_metadata(spec.resume_checkpoint)["resolved_config_json"])
+    replay_receipt = require_replay_compatibility(spec, saved_config)
     prior_argv = sys.argv
     with explicit_support(spec) as receipt:
+        receipt["replay_compatibility"] = replay_receipt
         try:
             sys.argv = ["policy_metric_logging", "scripts/train_flash_sac.py",
                         str(output / "train-metrics.jsonl"), *physical_training_overrides(spec, output)]
@@ -188,9 +214,19 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
             raise ValueError("checkpoint wrist gains differ from the frozen spec")
     elif embodiment["_target_"] != "flash_chord.embodiments.sharpa_hands.SharpaHandsConfig":
         raise ValueError("checkpoint does not use the original wrist configuration")
+    for action in (config["action"], config["env"]["action"]):
+        if action["wrist_pos_clip"] != (0.2 if spec.wrist_pos_clip is None else spec.wrist_pos_clip):
+            raise ValueError("checkpoint wrist residual bound differs from the frozen spec")
     if any(stage["objective_weights"]["unintended_contact"] != spec.unintended_contact_weight
            for stage in config["curriculum"]["stages"]):
         raise ValueError("checkpoint contact penalty differs from the frozen spec")
+    expected_objective = ("flash_chord.objectives.config.ObjectiveConfig"
+                          if spec.release_start_frame is None else
+                          "experiments.nvidia_v2d.release_contact_objective.make_release_contact_objective")
+    for objective in (config["objective"], config["env"]["objective"]):
+        if (objective["_target_"] != expected_objective
+                or objective.get("release_start_frame") != spec.release_start_frame):
+            raise ValueError("checkpoint release objective differs from the frozen spec")
     output.mkdir(parents=True, exist_ok=True)
     with explicit_support(spec) as receipt:
         evidence = evaluate_with_evidence(checkpoint, spec.evaluation_worlds, output,
@@ -201,7 +237,9 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
                                                         "motion_speed": spec.motion_speed,
                                                         "wrist_kp": spec.wrist_kp,
                                                         "wrist_kd": spec.wrist_kd,
+                                                        "wrist_pos_clip": spec.wrist_pos_clip,
                                                         "training_reset_always_first": spec.always_reset_to_first_frame,
+                                                        "release_start_frame": spec.release_start_frame,
                                                         "unintended_contact_weight": spec.unintended_contact_weight})
     _write(output / "evaluation-scene.json", receipt)
     return evidence
@@ -218,6 +256,7 @@ def run(spec: SingleSampleSpec, spec_path: Path, output: Path) -> dict[str, Any]
         "policy_quality_claim_allowed": False, "geometry_quality_accepted": False,
         "stages": [], "evaluation_checkpoints": [],
         "training_reset_voc_boost_disabled": True,
+        "resume_replay_mode": "fresh" if spec.reset_replay else "restored" if spec.resume_replay else "new",
         "metric_logging": "each collection; each saved policy checkpoint; fsynced JSONL/CSV and SVG curves",
     }
     output.mkdir(parents=True, exist_ok=True)

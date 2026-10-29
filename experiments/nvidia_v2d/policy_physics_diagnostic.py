@@ -1,4 +1,4 @@
-"""Physical zero-residual/reference tracking diagnostic, never learned-policy success.
+"""Capture actual physical trajectories for reference, scripted, or learned actions.
 
 Run inside the frozen FlashCHORD image. Inputs/checkpoint remain read-only.
 The optional robot-ground collision filter is an explicitly labeled causal ablation,
@@ -27,6 +27,8 @@ def main() -> None:
     parser.add_argument("--motion-speed", type=float, default=None)
     parser.add_argument("--wrist-kp", type=float, default=None)
     parser.add_argument("--wrist-kd", type=float, default=None)
+    parser.add_argument("--capture-contacts", action="store_true",
+                        help="Save all post-step contact geometry/forces and policy actions")
     parser.add_argument("--grasp-offset-max", type=float, default=0.04)
     parser.add_argument("--grasp-center-feedback-max", type=float, default=0.03)
     parser.add_argument("--grasp-phases", type=float, nargs=4, default=(2.5, 3.3, 8.5, 9.5),
@@ -44,7 +46,7 @@ def main() -> None:
     import jax.numpy as jnp
     import newton
     from flash_chord.evaluation import harness
-    from flash_chord.runtime.contact import read_contacts_w
+    from flash_chord.runtime.contact import contact_gaps_w, read_contacts_w
     from flash_chord.training.checkpoint import read_checkpoint_metadata
     from flash_chord.utils.quat import quat_rotate_xyzw
 
@@ -92,6 +94,7 @@ def main() -> None:
         return result
 
     bodies, diagnostics, slot_contacts, scales, ground_contacts = [], [], [], [], []
+    contact_frames, policy_actions, body_velocities, joint_targets = [], [], [], []
     metadata = {}
     reference_wrists = {}
     initial = {}
@@ -107,6 +110,7 @@ def main() -> None:
                         diagnostic_names=list(env.termination.packed_diagnostic_names),
                         body_count=count, world_count=env.world_count,
                         fps=float(env.config.sim.fps), action_dimension=env.action.action_dim)
+        metadata["body_mass_kg"] = model.body_mass.numpy().reshape(env.world_count, count).tolist()
         initial["body_pose"] = env.state_0.body_q.numpy().reshape(env.world_count, count, 7).copy()
         for side in ("left", "right"):
             reference_wrists[side] = np.asarray(reference.wrist_pos_w(side)).copy()
@@ -135,6 +139,20 @@ def main() -> None:
                                              "world_min_xyz": points.min(axis=0).tolist(),
                                              "world_max_xyz": points.max(axis=0).tolist()})
         metadata["initial_object_geometry"] = initial_geometry
+        if args.capture_contacts:
+            layout = env.contact.layout
+            metadata["contact_recording"] = {
+                "timing": "after each control step, last physics substep",
+                "force_convention": "force/torque act on shape0; reaction on shape1 is negative",
+                "gap_convention": "signed normal separation; negative is penetration",
+                "force_attribute_present": getattr(env.contacts, "force", None) is not None,
+                "shape_labels": list(model.shape_label),
+                "shape_body_ids": model.shape_body.numpy().tolist(),
+                "layout": asdict(layout),
+                "action_block_names": list(env.action.block_names),
+                "action_block_ranges": list(env.action.block_ranges),
+                "action_input_mode": env.action.input_mode,
+            }
         feedback = None
         if args.action_mode == "scripted-grasp":
             from experiments.nvidia_v2d.scripted_grasp_feedback import (
@@ -157,11 +175,25 @@ def main() -> None:
                 if not np.isfinite(voc).all() or not np.isfinite(applied).all() or np.any(voc) or np.any(applied):
                     raise RuntimeError("nonzero or nonfinite auxiliary object control")
                 scales.append([float(np.max(np.abs(voc))), float(np.max(np.abs(applied)))])
+                if args.capture_contacts:
+                    policy_actions.append(np.asarray(action).copy())
                 result = jax_env.step(action)
                 bodies.append(env.state_0.body_q.numpy().reshape(env.world_count, count, 7).copy())
                 diagnostics.append(env.termination.packed_diagnostics.numpy().copy())
                 slot_contacts.append(env.contact.raw_contact_count.numpy().copy())
                 contacts = read_contacts_w(model, env.state_0, env.contacts)
+                if args.capture_contacts:
+                    n = len(contacts)
+                    contact_frames.append({
+                        **{name: getattr(contacts, name).copy() for name in (
+                            "body0_ids", "body1_ids", "contact_pos_w", "contact_normal_w",
+                            "contact_force_w", "contact_torque_w")},
+                        "shape0_ids": env.contacts.rigid_contact_shape0.numpy()[:n].copy(),
+                        "shape1_ids": env.contacts.rigid_contact_shape1.numpy()[:n].copy(),
+                        "signed_gap_m": contact_gaps_w(model, env.state_0, env.contacts),
+                    })
+                    body_velocities.append(env.state_0.body_qd.numpy().reshape(env.world_count, count, 6).copy())
+                    joint_targets.append(env.action.joint_target.numpy().copy())
                 ground_contacts.append(int(np.count_nonzero((contacts.body0_ids < 0) | (contacts.body1_ids < 0))))
                 return result
 
@@ -198,6 +230,12 @@ def main() -> None:
     if hashlib.sha256(args.checkpoint.read_bytes()).hexdigest() != checkpoint_sha:
         raise RuntimeError("checkpoint changed")
     harness.write_evaluation_report(args.output / "diagnostic.metrics.json", outcome)
+    if args.capture_contacts:
+        from experiments.nvidia_v2d.policy_contact_recording import pack_contact_frames
+        feedback_data.update(pack_contact_frames(contact_frames),
+                             policy_actions=np.asarray(policy_actions),
+                             actual_body_velocities=np.asarray(body_velocities),
+                             action_joint_targets=np.asarray(joint_targets))
     np.savez_compressed(args.output / "diagnostic.npz", actual_bodies=np.asarray(bodies),
                         initial_bodies=initial["body_pose"], diagnostics=np.asarray(diagnostics),
                         hand_object_contact_counts=np.asarray(slot_contacts),
