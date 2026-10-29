@@ -24,6 +24,8 @@ def main() -> None:
     parser.add_argument("--action-mode", choices=("zero", "policy", "scripted-grasp"), default="zero")
     parser.add_argument("--ground-mode", choices=("original", "robot-filtered"), default="original")
     parser.add_argument("--support", type=Path, help="Explicit finite physical support; removes infinite plane")
+    parser.add_argument("--reference", type=Path,
+                        help="Explicit new reference for a labeled zero-shot/reference ablation; checkpoint remains unchanged")
     parser.add_argument("--motion-speed", type=float, default=None)
     parser.add_argument("--wrist-kp", type=float, default=None)
     parser.add_argument("--wrist-kd", type=float, default=None)
@@ -56,6 +58,11 @@ def main() -> None:
     original_record = harness.record_object_pose_rollout
     original_ground = newton.ModelBuilder.add_ground_plane
     original_setup = harness.setup_scene
+    original_reference_resolver = harness._resolve_parquet
+    if args.reference is not None:
+        if not args.reference.is_file():
+            raise ValueError("reference ablation parquet does not exist")
+        harness._resolve_parquet = lambda config, source_root: str(args.reference.resolve())
     setup_module = importlib.import_module("flash_chord.scene.setup")
     original_support_resolver = setup_module.support_usda_for_reference
     if args.support is not None:
@@ -250,6 +257,7 @@ def main() -> None:
         harness.record_object_pose_rollout = original_record
         newton.ModelBuilder.add_ground_plane = original_ground
         harness.setup_scene = original_setup
+        harness._resolve_parquet = original_reference_resolver
         setup_module.support_usda_for_reference = original_support_resolver
     if hashlib.sha256(args.checkpoint.read_bytes()).hexdigest() != checkpoint_sha:
         raise RuntimeError("checkpoint changed")
@@ -270,6 +278,9 @@ def main() -> None:
                        "scripted-grasp": "scripted_feedback_feasibility"}[args.action_mode],
               "claim": "diagnostic only; reference/scripted control is not learned-policy task success",
               "checkpoint": str(args.checkpoint), "checkpoint_sha256": checkpoint_sha,
+              "checkpoint_reference": checkpoint_config["task"]["parquet"],
+              "reference_override": str(args.reference.resolve()) if args.reference else None,
+              "reference_override_sha256": hashlib.sha256(args.reference.read_bytes()).hexdigest() if args.reference else None,
               "action_mode": args.action_mode, "ground_mode": args.ground_mode,
               "reference_tracking_criteria": tracking_criteria,
               "support": str(args.support) if args.support else None,

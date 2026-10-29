@@ -15,6 +15,8 @@ from experiments.nvidia_v2d.policy_single_sample import (
     explicit_support,
     physical_training_overrides,
     prepare,
+    require_physical_input_gate,
+    require_sim_contract,
     sha256,
 )
 
@@ -51,6 +53,19 @@ def test_explicit_resume_requires_optimizer_and_replay_state(tmp_path):
     assert "training.resume=true" in args
     assert "training.checkpoint_path='/archive/state_256.safetensors'" in args
     assert "training.checkpoint.load_replay_path='/archive/replay_256.safetensors'" in args
+
+
+def test_integration_rate_is_frozen_for_training_and_evaluation(tmp_path):
+    spec = make_spec(tmp_path, sim_substeps=20)
+    assert "sim.substeps=20" in physical_training_overrides(spec, Path("/run"))
+    cfg = {"sim": {"fps": 20.0, "substeps": 20}, "env": {"sim": {"fps": 20.0, "substeps": 20}}}
+    require_sim_contract(spec, cfg)
+    cfg["env"]["sim"]["substeps"] = 5
+    with pytest.raises(ValueError, match="timestep"):
+        require_sim_contract(spec, cfg)
+    for invalid in (True, 5.5, 0, 41):
+        with pytest.raises(ValueError):
+            make_spec(tmp_path, sim_substeps=invalid)
 
 
 def test_release_ablation_keeps_original_task_and_requires_real_penalty(tmp_path):
@@ -171,3 +186,41 @@ def test_prepare_freezes_reviewable_command_without_execution(tmp_path):
     assert set(manifest["host_source_sha256"]) == {"policy_logged_launch.py", "policy_observability.py"}
     with pytest.raises(FileExistsError):
         prepare(args)
+
+
+def test_repaired_reference_and_audit_inputs_are_mounted_read_only(tmp_path):
+    spec = make_spec(tmp_path, parquet=Path("/candidate/data.parquet"),
+        gate=Path("/candidate/gate.json"), additional_readonly_inputs=(Path("/evidence"),))
+    args = docker_command(spec, tmp_path / "spec.json", tmp_path / "job",
+                          Path("/code"), Path("/legacy"), Path("/cache"))
+    assert args.count("/candidate:/candidate:ro") == 1
+    assert "/evidence:/evidence:ro" in args
+    with pytest.raises(ValueError, match="must not contain"):
+        docker_command(spec, tmp_path / "spec.json", Path("/candidate/job"),
+                       Path("/code"), Path("/legacy"), Path("/cache"))
+
+
+def test_semantic_contact_requires_bound_reference_and_preserves_release(tmp_path):
+    with pytest.raises(ValueError, match="hashed map/reference"):
+        make_spec(tmp_path, semantic_map_path=Path("/roles.npz"))
+    spec = make_spec(tmp_path, release_start_frame=407, semantic_map_path=Path("/roles.npz"),
+        semantic_map_sha256="a" * 64, semantic_reference_sha256="b" * 64)
+    args = physical_training_overrides(spec, Path("/run"))
+    assert "objective._target_=experiments.nvidia_v2d.semantic_contact_objective.make_semantic_contact_objective" in args
+    assert "+objective.release_start_frame=407" in args
+    assert "+objective.semantic_motion_speed=0.5" in args
+    assert "+objective.semantic_sigma_m=0.02" in args
+    assert not any(value.startswith(("termination.", "action.wrist_tau_max=")) for value in args)
+
+
+def test_semantic_reference_and_role_map_must_share_an_acceptance_receipt(tmp_path, monkeypatch):
+    parquet = tmp_path / "candidate.parquet"; parquet.write_bytes(b"candidate")
+    spec = make_spec(tmp_path, release_start_frame=407, parquet=parquet,
+        semantic_map_path=Path("/roles.npz"), semantic_map_sha256="a" * 64,
+        semantic_reference_sha256=sha256(parquet))
+    gate = {"semantic_map_path": "/roles.npz", "semantic_map_sha256": "a" * 64}
+    monkeypatch.setattr("experiments.nvidia_v2d.policy_single_sample.require_experiment_gate", lambda _: gate)
+    assert require_physical_input_gate(spec) is gate
+    gate["semantic_map_sha256"] = "b" * 64
+    with pytest.raises(ValueError, match="accepted together"):
+        require_physical_input_gate(spec)

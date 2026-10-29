@@ -35,6 +35,46 @@ def verify_gate(
 
     try:
         gate = json.loads(check(path))
+        if gate.get("schema_version") == "nvidia_v2d.repaired_reference_gate.v1":
+            # A derived reference keeps the original input gate and binds every
+            # repair/audit artifact. It cannot borrow the old output's hash or
+            # silently declare full geometric/physical quality established.
+            if (gate.get("training_ready") is not True or gate.get("blockers")
+                    or gate.get("purpose") != "mechanism_validation"
+                    or gate.get("geometry_quality_accepted") is not False):
+                raise ValueError("repaired reference gate has not passed its explicit input audit")
+            parent_path = Path(gate["parent_gate_path"])
+            parent = json.loads(bound(parent_path, gate["parent_gate_sha256"]))
+            if parent.get("schema_version") != "nvidia_v2d.sharpa_training_gate.v1":
+                raise ValueError("repair parent must be the original reference gate")
+            original = Path(gate["original_parquet"])
+            inherited = verify_gate(parent_path, backend=backend, parquet=original, episode_id=episode_id)
+            verified.update(inherited["verified_files"])
+            manifest = json.loads(bound(Path(gate["repair_manifest_path"]), gate["repair_manifest_sha256"]))
+            if (manifest.get("status") != "completed" or manifest.get("training_allowed") is not True
+                    or Path(manifest["input_parquet"]) != original
+                    or Path(manifest["output_parquet"]) != parquet
+                    or manifest["frame_count"] != inherited["frame_count"]
+                    or manifest.get("source_unchanged") is not True
+                    or not manifest.get("input_sha256")):
+                raise ValueError("repaired reference manifest is incomplete or belongs to another sample")
+            for file, digest in manifest["input_sha256"].items():
+                bound(Path(file), digest)
+            bound(original, manifest["original_sha256"])
+            bound(parquet, manifest["output_sha256"])
+            audit = json.loads(bound(Path(manifest["audit_path"]), manifest["audit_sha256"]))
+            required = ("finite_arrays", "frame_count", "contact_normals", "object_support",
+                        "robot_contact_mapping", "release_clearance", "unchanged_auxiliary_and_physics")
+            if (audit.get("candidate_sha256") != manifest["output_sha256"]
+                    or any(audit.get("checks", {}).get(name) is not True for name in required)):
+                raise ValueError("repaired reference is missing required independent acceptance checks")
+            role_path, role_sha = manifest.get("semantic_map_path"), manifest.get("semantic_map_sha256")
+            if role_path is not None or role_sha is not None:
+                bound(Path(role_path), role_sha)
+                if audit.get("semantic_map_sha256") != role_sha:
+                    raise ValueError("semantic map was not accepted with this reference")
+            return {**gate, "frame_count": inherited["frame_count"], "verified_files": verified,
+                    "semantic_map_path": role_path, "semantic_map_sha256": role_sha}
         if (
             gate.get("schema_version") != "nvidia_v2d.sharpa_training_gate.v1"
             or gate.get("training_ready") is not True

@@ -38,7 +38,7 @@ from experiments.nvidia_v2d.policy_experiment import (
 LEGACY_ROOT = Path("/var/tmp/fmc3-sharpa-validation-20261027-001")
 FROZEN_IMAGE = "sha256:7fdce3ad594fbad8b5983fde7846908be2ed6179ba4ebcfd1edefbcbcf4c628c"
 SOURCE_FILES = (*CODE_FILES, "policy_single_sample.py", "physical_wrist_config.py",
-                "release_contact_objective.py", "policy_replay_contract.py")
+                "release_contact_objective.py", "semantic_contact_objective.py", "policy_replay_contract.py")
 
 
 class SingleSampleSpec(ExperimentSpec):
@@ -66,6 +66,12 @@ class SingleSampleSpec(ExperimentSpec):
     resume_checkpoint: Path | None = None
     resume_replay: Path | None = None
     reset_replay: bool = False
+    additional_readonly_inputs: tuple[Path, ...] = ()
+    semantic_map_path: Path | None = None
+    semantic_map_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    semantic_reference_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    semantic_sigma_m: float = Field(default=0.02, gt=0, le=0.1, allow_inf_nan=False)
+    sim_substeps: int = Field(default=5, ge=5, le=40, strict=True)
 
     @model_validator(mode="after")
     def physical_contract(self) -> SingleSampleSpec:
@@ -87,11 +93,27 @@ class SingleSampleSpec(ExperimentSpec):
             raise ValueError("checkpoint interval must contain complete collection batches")
         if not self.image.startswith("sha256:"):
             raise ValueError("use a content-addressed frozen container image")
+        if any(not path.is_absolute() for path in self.additional_readonly_inputs):
+            raise ValueError("additional read-only inputs must use absolute paths")
+        semantic = (self.semantic_map_path, self.semantic_map_sha256, self.semantic_reference_sha256)
+        if (any(value is not None for value in semantic)
+                and (any(value is None for value in semantic) or self.release_start_frame is None)):
+            raise ValueError("semantic contact requires a hashed map/reference and release frame")
         return self
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def require_physical_input_gate(spec: SingleSampleSpec) -> dict[str, Any]:
+    gate = require_experiment_gate(spec)
+    if spec.semantic_map_path is not None and (
+            gate.get("semantic_map_path") != str(spec.semantic_map_path)
+            or gate.get("semantic_map_sha256") != spec.semantic_map_sha256
+            or sha256(spec.parquet) != spec.semantic_reference_sha256):
+        raise ValueError("semantic map and reference were not accepted together by the input gate")
+    return gate
 
 
 def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[str]:
@@ -104,6 +126,7 @@ def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[st
     args.extend([
         "scene.support=true", "collision.ground=false", "collision.robot_support_collision=true",
         f"task.motion_speed={spec.motion_speed}",
+        f"sim.substeps={spec.sim_substeps}",
         f"reset.always_reset_to_first_frame={str(spec.always_reset_to_first_frame).lower()}",
         f"output_dir='{output / 'train'}'", f"hydra.run.dir='{output / 'hydra/train'}'",
         f"training.checkpoint.save_interval_environment_steps={interval}",
@@ -120,10 +143,18 @@ def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[st
         args.extend(f"curriculum.stages.{i}.objective_weights.unintended_contact={spec.unintended_contact_weight}"
                     for i in range(len(THRESHOLDS)))
     if spec.release_start_frame is not None:
+        factory = ("semantic_contact_objective.make_semantic_contact_objective" if spec.semantic_map_path
+                   else "release_contact_objective.make_release_contact_objective")
         args.extend([
-            "objective._target_=experiments.nvidia_v2d.release_contact_objective.make_release_contact_objective",
+            f"objective._target_=experiments.nvidia_v2d.{factory}",
             f"+objective.release_start_frame={spec.release_start_frame}",
         ])
+    if spec.semantic_map_path is not None:
+        args.extend([f"+objective.semantic_map_path='{spec.semantic_map_path}'",
+                     f"+objective.semantic_map_sha256='{spec.semantic_map_sha256}'",
+                     f"+objective.semantic_reference_sha256='{spec.semantic_reference_sha256}'",
+                     f"+objective.semantic_motion_speed={spec.motion_speed}",
+                     f"+objective.semantic_sigma_m={spec.semantic_sigma_m}"])
     if spec.resume_checkpoint is not None:
         args.extend(["training.resume=true", f"training.checkpoint_path='{spec.resume_checkpoint}'"])
         args.append("training.checkpoint.load_replay_path=null" if spec.reset_replay else
@@ -168,7 +199,7 @@ def train(spec: SingleSampleSpec, output: Path) -> None:
         require_replay_compatibility,
     )
 
-    require_experiment_gate(spec)
+    require_physical_input_gate(spec)
     saved_config = {}
     if spec.resume_checkpoint is not None:
         from flash_chord.training.checkpoint import read_checkpoint_metadata
@@ -195,8 +226,10 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
         evaluate_with_evidence,
     )
 
+    require_physical_input_gate(spec)
     metadata = read_checkpoint_metadata(checkpoint)
     config = json.loads(metadata["resolved_config_json"])
+    require_sim_contract(spec, config)
     if (not config["scene"]["support"] or config["collision"]["ground"]
             or not config["collision"]["robot_support_collision"]
             or config["reset"]["voc_decay_steps"] != 0):
@@ -222,11 +255,18 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
         raise ValueError("checkpoint contact penalty differs from the frozen spec")
     expected_objective = ("flash_chord.objectives.config.ObjectiveConfig"
                           if spec.release_start_frame is None else
+                          "experiments.nvidia_v2d.semantic_contact_objective.make_semantic_contact_objective"
+                          if spec.semantic_map_path is not None else
                           "experiments.nvidia_v2d.release_contact_objective.make_release_contact_objective")
     for objective in (config["objective"], config["env"]["objective"]):
         if (objective["_target_"] != expected_objective
                 or objective.get("release_start_frame") != spec.release_start_frame):
             raise ValueError("checkpoint release objective differs from the frozen spec")
+        if spec.semantic_map_path is not None and any(objective.get(key) != value for key, value in {
+            "semantic_map_path": str(spec.semantic_map_path), "semantic_map_sha256": spec.semantic_map_sha256,
+            "semantic_reference_sha256": spec.semantic_reference_sha256, "semantic_motion_speed": spec.motion_speed,
+            "semantic_sigma_m": spec.semantic_sigma_m}.items()):
+            raise ValueError("checkpoint semantic contact contract differs from the frozen spec")
     output.mkdir(parents=True, exist_ok=True)
     with explicit_support(spec) as receipt:
         evidence = evaluate_with_evidence(checkpoint, spec.evaluation_worlds, output,
@@ -235,6 +275,7 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
                                                         "ground": False,
                                                         "robot_support_collision": True,
                                                         "motion_speed": spec.motion_speed,
+                                                        "sim_substeps": spec.sim_substeps,
                                                         "wrist_kp": spec.wrist_kp,
                                                         "wrist_kd": spec.wrist_kd,
                                                         "wrist_pos_clip": spec.wrist_pos_clip,
@@ -243,6 +284,13 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
                                                         "unintended_contact_weight": spec.unintended_contact_weight})
     _write(output / "evaluation-scene.json", receipt)
     return evidence
+
+
+def require_sim_contract(spec: SingleSampleSpec, config: dict[str, Any]) -> None:
+    """Evaluation must use the trained integration rate, with unchanged control FPS."""
+    for sim in (config["sim"], config["env"]["sim"]):
+        if sim.get("substeps") != spec.sim_substeps or sim.get("fps") != 20.0:
+            raise ValueError("checkpoint simulation timestep differs from the frozen spec")
 
 
 def run(spec: SingleSampleSpec, spec_path: Path, output: Path) -> dict[str, Any]:
@@ -301,7 +349,7 @@ def run(spec: SingleSampleSpec, spec_path: Path, output: Path) -> dict[str, Any]
                     or frozen["spec_sha256"] != sha256(spec_path)
                     or frozen["support_sha256"] != sha256(spec.support_usda)):
                 raise ValueError("prepared source, spec or support changed before execution")
-        gate = require_experiment_gate(spec)
+        gate = require_physical_input_gate(spec)
         record["verified_input_sha256"] = gate["verified_files"]
         save()
         # Reserve time to evaluate saved weights if the training budget is interrupted.
@@ -432,9 +480,14 @@ def docker_command(spec: SingleSampleSpec, spec_path: Path, output: Path,
               (legacy_inputs, str(LEGACY_ROOT), "ro"), (output, "/run", "rw"),
               (cache, "/cache", "rw"), (spec_path, "/single-sample-spec.json", "ro")]
     # Inputs outside the repository (e.g. an archived state/replay) stay read-only.
-    for path in (spec.support_usda, spec.resume_checkpoint, spec.resume_replay):
+    for path in (spec.parquet.parent, spec.gate.parent, spec.support_usda,
+                 spec.resume_checkpoint, spec.resume_replay, spec.semantic_map_path, *spec.additional_readonly_inputs):
         if path is not None and not path.is_relative_to(repository) and not path.is_relative_to(LEGACY_ROOT):
-            mounts.append((path, str(path), "ro"))
+            if output == path or output.is_relative_to(path):
+                raise ValueError("read-only input mount must not contain the output directory")
+            item = (path, str(path), "ro")
+            if item not in mounts:
+                mounts.append(item)
     args = ["docker", "run", "--rm", "--init", "--name", f"fmc3-{output.name}", "--gpus", "device=0",
             "--network", "none", "--memory", "20g", "--memory-swap", "20g", "--cpus", "8",
             "--shm-size", "2g", "--user", f"{os.getuid()}:{os.getgid()}"]
