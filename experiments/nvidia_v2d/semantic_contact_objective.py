@@ -246,6 +246,7 @@ class SemanticContactObjective(ReleaseContactObjective):
             active = self.role_diagnostics.numpy().reshape(-1, 2, 6)[:, 1, 0] == 1
             if active.any():
                 metrics["contact/right/wrist_command_distance_m"] = float(p.command_distance.numpy()[active].mean())
+                metrics["contact/right/wrist_command_cost_active_mean"] = float(costs[active].mean())
         return metrics
 
     def evaluate(self, state, timestep, terminated):

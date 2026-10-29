@@ -55,6 +55,11 @@ def summarize_transition(role_values, base_support, role_match, alignment_cost, 
         "contact/alignment_penalty_mean": float(weight * np.mean(alignment_cost)),
         "contact/mixed_support_mean": float(np.mean(mixed_support)),
     }
+    active_worlds = np.any(roles[:, :, 0] == 1, axis=1)
+    result["contact/active_worlds"] = float(active_worlds.sum())
+    if active_worlds.any():
+        result["contact/role_match_active_mean"] = float(np.asarray(role_match)[active_worlds].mean())
+        result["contact/alignment_cost_active_mean"] = float(np.asarray(alignment_cost)[active_worlds].mean())
     names = ("target_distance_m", "normal_dot", "role_pair_fraction", "geometry_cost", "distance_cap_fraction")
     for side_index, side in enumerate(("left", "right")):
         rows = roles[:, side_index]

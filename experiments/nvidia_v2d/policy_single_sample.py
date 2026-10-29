@@ -83,8 +83,8 @@ class SingleSampleSpec(ExperimentSpec):
             raise ValueError("wrist gain ablation requires both kp and kd")
         if self.release_start_frame is not None and self.unintended_contact_weight >= 0:
             raise ValueError("release contact objective requires a negative contact penalty")
-        if self.backend not in ("official", "multitip"):
-            raise ValueError("backend must be official or multitip")
+        if self.backend not in ("official", "dexpilot", "multitip"):
+            raise ValueError("backend must be official, dexpilot or multitip")
         if self.verify_resume:
             raise ValueError("use explicit resume_checkpoint and resume_replay")
         if self.reset_replay and (self.resume_checkpoint is None or self.resume_replay is not None):

@@ -12,7 +12,7 @@ from typing import Any, Literal
 def verify_gate(
     path: Path,
     *,
-    backend: Literal["official", "multitip"],
+    backend: Literal["official", "dexpilot", "multitip"],
     parquet: Path,
     episode_id: str | None = None,
 ) -> dict[str, Any]:
@@ -35,6 +35,43 @@ def verify_gate(
 
     try:
         gate = json.loads(check(path))
+        if gate.get("schema_version") == "nvidia_v2d.geometry_ablation_gate.v1":
+            # The user's matched ablation needs numerical/provenance acceptance,
+            # not perfect contact geometry. Keep the old stricter repair gate
+            # intact for its historical experiments.
+            if (backend != "official" or gate.get("training_ready") is not True
+                    or gate.get("input_contract_passed") is not True or gate.get("blockers")
+                    or gate.get("purpose") != "mechanism_validation"
+                    or gate.get("geometry_quality_accepted") is not False):
+                raise ValueError("invalid official geometry ablation input contract")
+            parent_path = Path(gate["parent_gate_path"])
+            parent = json.loads(bound(parent_path, gate["parent_gate_sha256"]))
+            if parent.get("schema_version") != "nvidia_v2d.sharpa_training_gate.v1":
+                raise ValueError("ablation parent must be the unmodified original gate")
+            original = Path(gate["original_parquet"])
+            inherited = verify_gate(parent_path, backend=backend, parquet=original, episode_id=episode_id)
+            verified.update(inherited["verified_files"])
+            manifest = json.loads(bound(Path(gate["ablation_manifest_path"]), gate["ablation_manifest_sha256"]))
+            if (manifest.get("status") != "completed" or manifest.get("backend") != backend
+                    or manifest.get("factor") not in ("normal", "support", "normal-support")
+                    or Path(manifest["input_parquet"]) != original
+                    or Path(manifest["output_parquet"]) != parquet
+                    or manifest["frame_count"] != inherited["frame_count"]
+                    or manifest.get("source_unchanged") is not True or not manifest.get("input_sha256")):
+                raise ValueError("ablation manifest does not bind the declared factor and input")
+            for file, digest in manifest["input_sha256"].items():
+                bound(Path(file), digest)
+            bound(original, manifest["original_sha256"])
+            bound(parquet, manifest["output_sha256"])
+            audit = json.loads(bound(Path(manifest["audit_path"]), manifest["audit_sha256"]))
+            required = ("finite_arrays", "frame_count", "factor_scope",
+                        "unchanged_joint_trajectories", "unchanged_physics")
+            if (audit.get("candidate_sha256") != manifest["output_sha256"]
+                    or audit.get("factor") != manifest["factor"]
+                    or any(audit.get("checks", {}).get(name) is not True for name in required)):
+                raise ValueError("ablation numerical or factor-isolation audit is incomplete")
+            return {**gate, "frame_count": inherited["frame_count"],
+                    "geometry_factor": manifest["factor"], "verified_files": verified}
         if gate.get("schema_version") in ("nvidia_v2d.repaired_reference_gate.v1", "nvidia_v2d.repaired_reference_gate.v2"):
             # A derived reference keeps the original input gate and binds every
             # repair/audit artifact. It cannot borrow the old output's hash or
@@ -98,7 +135,8 @@ def verify_gate(
         episode, audit, retarget = (
             documents[k] for k in ("episode_gate", "geometry_audit", "retarget_manifest")
         )
-        expected_backend = {"official": "official-ik", "multitip": "unidex-inspired-ik-v2"}[backend]
+        expected_backend = {"official": "official-ik", "dexpilot": "dexpilot-chain-calibrated",
+                            "multitip": "unidex-inspired-ik-v2"}[backend]
         if retarget["backend"] != expected_backend or audit["backend"] != expected_backend:
             raise ValueError("gate重定向路线不一致")
         if episode_id is not None and episode["source"]["sequence_id"] != episode_id:

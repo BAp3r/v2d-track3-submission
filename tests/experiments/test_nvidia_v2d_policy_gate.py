@@ -210,3 +210,39 @@ def test_collision_gate_requires_real_union_and_complete_audit(tmp_path, missing
         union.write_bytes(b"changed actual convex shapes")
         with pytest.raises(ValueError, match="变化"):
             verify_gate(gate, backend="official", parquet=candidate)
+
+
+@pytest.mark.parametrize("missing", [None, "factor_scope", "unchanged_joint_trajectories"])
+def test_ablation_requires_isolation_but_not_contact_perfection(tmp_path, missing):
+    parent, original = fixture_gate(tmp_path)
+    digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+    candidate = tmp_path / "ablation.parquet"
+    candidate.write_bytes(b"normal-only candidate")
+    audit = tmp_path / "ablation-audit.json"
+    checks = dict.fromkeys(("finite_arrays", "frame_count", "factor_scope",
+                           "unchanged_joint_trajectories", "unchanged_physics"), True)
+    if missing:
+        checks[missing] = False
+    audit.write_text(json.dumps({"checks": checks, "factor": "normal",
+        "candidate_sha256": digest(candidate), "contact_perfection": False}))
+    manifest = tmp_path / "ablation-manifest.json"
+    manifest.write_text(json.dumps({"status": "completed", "backend": "official", "factor": "normal",
+        "input_parquet": str(original), "output_parquet": str(candidate), "frame_count": 2,
+        "source_unchanged": True, "input_sha256": {str(original): digest(original)},
+        "original_sha256": digest(original), "output_sha256": digest(candidate),
+        "audit_path": str(audit), "audit_sha256": digest(audit)}))
+    gate = tmp_path / "ablation-gate.json"
+    gate.write_text(json.dumps({"schema_version": "nvidia_v2d.geometry_ablation_gate.v1",
+        "training_ready": True, "input_contract_passed": True, "purpose": "mechanism_validation",
+        "geometry_quality_accepted": False, "parent_gate_path": str(parent),
+        "parent_gate_sha256": digest(parent), "original_parquet": str(original),
+        "ablation_manifest_path": str(manifest), "ablation_manifest_sha256": digest(manifest)}))
+    if missing:
+        with pytest.raises(ValueError, match="isolation"):
+            verify_gate(gate, backend="official", parquet=candidate)
+    else:
+        result = verify_gate(gate, backend="official", parquet=candidate)
+        assert result["geometry_factor"] == "normal"
+        assert result["geometry_quality_accepted"] is False
+        with pytest.raises(ValueError, match="official"):
+            verify_gate(gate, backend="multitip", parquet=candidate)

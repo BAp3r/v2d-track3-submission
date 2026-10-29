@@ -38,8 +38,12 @@ def test_transition_metrics_ignore_unknown_geometry_and_measure_each_side():
     assert metrics["contact/alignment_penalty_mean"] == .125
     assert metrics["contact/mixed_support_mean"] == 2.375
     assert metrics["contact/right/active_worlds"] == 1.
+    assert metrics["contact/active_worlds"] == 1.
+    assert metrics["contact/role_match_active_mean"] == .5
+    assert metrics["contact/alignment_cost_active_mean"] == 1.
     assert metrics["contact/left/aligned_pair_fraction"] == 1.
     assert metrics["contact/right/aligned_pair_fraction"] == 0.
     metrics = summarize_transition(np.zeros((2, 2, 6)), [0., 0.], [1., 1.], [0., 0.], [0., 0.], 0.)
     assert metrics["contact/right/active_worlds"] == 0.
+    assert "contact/role_match_active_mean" not in metrics
     assert "contact/right/target_distance_m" not in metrics

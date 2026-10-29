@@ -21,7 +21,7 @@ class RunSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
     phase: Literal["validation", "retarget", "training", "evaluation", "render"]
     episode_id: str
-    backend: Literal["official", "multitip", "fixture"]
+    backend: Literal["official", "dexpilot", "multitip", "fixture"]
     argv: list[str] = Field(min_length=1)
     cwd: Path
     inputs: list[Path] = Field(default_factory=list)

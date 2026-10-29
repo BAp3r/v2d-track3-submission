@@ -62,7 +62,7 @@ CODE_FILES = (
 
 class ExperimentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    backend: Literal["official", "multitip"]
+    backend: Literal["official", "dexpilot", "multitip"]
     parquet: Path
     gate: Path
     budget: TrainingBudget
