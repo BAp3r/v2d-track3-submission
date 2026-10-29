@@ -2,8 +2,9 @@
 
 This extends the release objective and explicitly changes the meaning of the
 existing contact_wrench_support term, so old replay must not be reused. Wrench
-support is multiplied by mean trusted role agreement; no action, state, force
-limit, reference trajectory, or success criterion is changed here.
+support is multiplied by mean trusted role agreement. An optional independent,
+bounded alignment cost supplies a signal outside the Gaussian's narrow basin.
+No action, state, force limit, reference or success criterion is changed here.
 """
 from __future__ import annotations
 
@@ -58,6 +59,44 @@ def match_semantic_contacts(
         match = total / float(used)
     role_match[world] = match
     contact_support[world] *= match
+
+
+@wp.kernel
+def penalize_role_alignment(
+    body_pose: wp.array(dtype=wp.transform), timestep: wp.array(dtype=wp.int32),
+    active: wp.array(dtype=wp.int32), body_ids: wp.array(dtype=wp.int32),
+    robot_point: wp.array(dtype=wp.vec3), robot_normal: wp.array(dtype=wp.vec3),
+    object_point: wp.array(dtype=wp.vec3), object_normal: wp.array(dtype=wp.vec3),
+    frames: int, roles: int, bodies_per_world: int, object_body: int, weight: float,
+    alignment_cost: wp.array(dtype=wp.float32), contact_support: wp.array(dtype=wp.float32),
+):
+    world = wp.tid()
+    frame = wp.clamp(timestep[world], 0, frames - 1)
+    total = float(0.0)  # noqa: UP018 - mutable Warp loop variable
+    used = int(0)  # noqa: UP018, RUF046 - mutable Warp loop variable
+    object_pose = body_pose[world * bodies_per_world + object_body]
+    for role in range(roles):
+        i = frame * roles + role
+        if active[i] != 0:
+            robot_pose = body_pose[world * bodies_per_world + body_ids[i]]
+            # Match the independently accepted IK target: 1mm outside the
+            # object surface (stored normals point inward).
+            target = object_point[i] - 0.001 * object_normal[i]
+            distance = wp.length(wp.transform_point(robot_pose, robot_point[i])
+                                 - wp.transform_point(object_pose, target))
+            dot = wp.clamp(wp.dot(wp.transform_vector(robot_pose, robot_normal[i]),
+                                 wp.transform_vector(object_pose, object_normal[i])), -1.0, 1.0)
+            # Linear signal between the accepted 6mm tolerance and 30cm cap.
+            # The cap bounds failed/free-fall trajectories; normals remain
+            # learnable even when opposed. Good roles contribute zero cost.
+            total += wp.max(wp.min(distance, 0.3) - 0.006, 0.0) / 0.05
+            total += wp.max(0.5 - dot, 0.0) / 1.5
+            used += 1
+    cost = float(0.0)  # noqa: UP018 - Warp branch variable
+    if used > 0:
+        cost = total / float(used)
+    alignment_cost[world] = cost
+    contact_support[world] -= weight * cost
 
 
 def bind_role_map(path, expected_sha, reference, reference_sha, motion_speed, model, embodiment, contact, worlds):
@@ -133,6 +172,7 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
     semantic_reference_sha256: str = ""
     semantic_motion_speed: float = .5
     semantic_sigma_m: float = .02
+    semantic_alignment_weight: float = 0.0
 
     def __post_init__(self):
         super().__post_init__()
@@ -140,6 +180,8 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
             raise ValueError("semantic contact objective requires hashed map and reference")
         if not all(math.isfinite(x) and x > 0 for x in (self.semantic_motion_speed, self.semantic_sigma_m)):
             raise ValueError("semantic motion speed and sigma must be finite and positive")
+        if not math.isfinite(self.semantic_alignment_weight) or not 0 <= self.semantic_alignment_weight <= 1:
+            raise ValueError("semantic alignment weight must be finite in [0, 1]")
 
     def build(self, model, embodiment, robot_reference, reference, command, contact, action,
               world_count, frame_dt, device=None, reference_joint_q_offset=None, episode_start_frame=None):
@@ -153,7 +195,8 @@ class SemanticContactObjectiveConfig(ReleaseContactObjectiveConfig):
             dtype=wp.int32 if values.ndim == 2 else wp.vec3, device=device) for key, values in arrays.items()}
         return SemanticContactObjective(inner, self.release_start_frame, device_arrays,
             wp.zeros(world_count, dtype=wp.float32, device=device), model.body_count // world_count,
-            contact.layout.object_body_ids[0], self.semantic_sigma_m)
+            contact.layout.object_body_ids[0], self.semantic_sigma_m,
+            self.semantic_alignment_weight, wp.zeros(world_count, dtype=wp.float32, device=device))
 
 
 @dataclass
@@ -163,6 +206,8 @@ class SemanticContactObjective(ReleaseContactObjective):
     bodies_per_world: int
     object_body: int
     sigma_m: float
+    alignment_weight: float
+    alignment_cost: object
 
     def evaluate(self, state, timestep, terminated):
         self.inner.evaluate(state, timestep, terminated)
@@ -173,6 +218,12 @@ class SemanticContactObjective(ReleaseContactObjective):
             a["robot_point_local"], a["robot_normal_local"], a["object_point_local"], a["object_normal_local"],
             raw.num_frames, 2, self.bodies_per_world, self.object_body, raw.contact.layout.slots_per_world,
             1 / (2 * self.sigma_m**2)], outputs=[self.role_match, raw.buffers.contact_wrench_support])
+        if self.alignment_weight > 0:
+            wp.launch(penalize_role_alignment, dim=raw.world_count, inputs=[state.body_q, timestep,
+                a["active"], a["body_ids"], a["robot_point_local"], a["robot_normal_local"],
+                a["object_point_local"], a["object_normal_local"], raw.num_frames, 2,
+                self.bodies_per_world, self.object_body, self.alignment_weight],
+                outputs=[self.alignment_cost, raw.buffers.contact_wrench_support])
         raw.buffers.compose(terminated, raw.action_rate_l2, raw.action_l2)
 
 

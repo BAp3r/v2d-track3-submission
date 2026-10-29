@@ -72,6 +72,7 @@ class SingleSampleSpec(ExperimentSpec):
     semantic_reference_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     semantic_sigma_m: float = Field(default=0.02, gt=0, le=0.1, allow_inf_nan=False)
     sim_substeps: int = Field(default=5, ge=5, le=40, strict=True)
+    semantic_alignment_weight: float = Field(default=0.0, ge=0, le=1, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def physical_contract(self) -> SingleSampleSpec:
@@ -99,6 +100,8 @@ class SingleSampleSpec(ExperimentSpec):
         if (any(value is not None for value in semantic)
                 and (any(value is None for value in semantic) or self.release_start_frame is None)):
             raise ValueError("semantic contact requires a hashed map/reference and release frame")
+        if self.semantic_alignment_weight and self.semantic_map_path is None:
+            raise ValueError("semantic alignment requires a trusted role map")
         return self
 
 
@@ -154,7 +157,8 @@ def physical_training_overrides(spec: SingleSampleSpec, output: Path) -> list[st
                      f"+objective.semantic_map_sha256='{spec.semantic_map_sha256}'",
                      f"+objective.semantic_reference_sha256='{spec.semantic_reference_sha256}'",
                      f"+objective.semantic_motion_speed={spec.motion_speed}",
-                     f"+objective.semantic_sigma_m={spec.semantic_sigma_m}"])
+                     f"+objective.semantic_sigma_m={spec.semantic_sigma_m}",
+                     f"+objective.semantic_alignment_weight={spec.semantic_alignment_weight}"])
     if spec.resume_checkpoint is not None:
         args.extend(["training.resume=true", f"training.checkpoint_path='{spec.resume_checkpoint}'"])
         args.append("training.checkpoint.load_replay_path=null" if spec.reset_replay else
@@ -267,6 +271,8 @@ def evaluate(spec: SingleSampleSpec, checkpoint: Path, output: Path,
             "semantic_reference_sha256": spec.semantic_reference_sha256, "semantic_motion_speed": spec.motion_speed,
             "semantic_sigma_m": spec.semantic_sigma_m}.items()):
             raise ValueError("checkpoint semantic contact contract differs from the frozen spec")
+        if spec.semantic_map_path is not None and objective.get("semantic_alignment_weight", 0.) != spec.semantic_alignment_weight:
+            raise ValueError("checkpoint semantic alignment differs from the frozen spec")
     output.mkdir(parents=True, exist_ok=True)
     with explicit_support(spec) as receipt:
         evidence = evaluate_with_evidence(checkpoint, spec.evaluation_worlds, output,

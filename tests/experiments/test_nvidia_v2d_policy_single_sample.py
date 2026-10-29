@@ -210,7 +210,10 @@ def test_semantic_contact_requires_bound_reference_and_preserves_release(tmp_pat
     assert "+objective.release_start_frame=407" in args
     assert "+objective.semantic_motion_speed=0.5" in args
     assert "+objective.semantic_sigma_m=0.02" in args
+    assert "+objective.semantic_alignment_weight=0.0" in args
     assert not any(value.startswith(("termination.", "action.wrist_tau_max=")) for value in args)
+    with pytest.raises(ValueError, match="trusted role map"):
+        make_spec(tmp_path, semantic_alignment_weight=.25)
 
 
 def test_semantic_reference_and_role_map_must_share_an_acceptance_receipt(tmp_path, monkeypatch):

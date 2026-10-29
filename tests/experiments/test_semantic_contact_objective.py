@@ -12,6 +12,7 @@ from experiments.nvidia_v2d.semantic_contact_objective import (
     bind_role_map,
     make_semantic_contact_objective,
     match_semantic_contacts,
+    penalize_role_alignment,
 )
 
 
@@ -97,3 +98,34 @@ def test_hydra_roundtrip_retains_semantic_and_release_contract():
     assert cfg.release_start_frame == 407 and cfg.semantic_sigma_m == .02
     with pytest.raises(ValueError, match="hashed"):
         make_semantic_contact_objective(release_start_frame=407)
+
+
+def test_alignment_cost_learns_far_role_without_wrench_and_ignores_unknowns():
+    poses = np.tile([0., 0., 0., 0., 0., 0., 1.], (18, 1))
+    poses[[2, 5, 8, 11], 0] = [.115, .065, .006, 1.]
+    poses[17, 3:] = [0., 0., 1., 0.]
+    source_poses = poses.copy()
+    normal = np.tile([1., 0., 0.], (4, 1)); normal[2:] = np.nan
+    point = np.zeros((4, 3)); point[2:] = np.nan
+    obj_point = np.tile([.001, 0., 0.], (4, 1)); obj_point[2:] = np.nan
+    score, cost = arr([0., 0., 0., 0., .7, 0.]), arr(np.zeros(6))
+    body_pose = arr(poses, wp.transform)
+    wp.launch(penalize_role_alignment, dim=6, inputs=[body_pose,
+        arr([0, 0, 0, 0, 1, 0], wp.int32), arr([1, 1, 0, 0], wp.int32),
+        arr([1, 2, 99999, 99999], wp.int32), arr(point, wp.vec3), arr(normal, wp.vec3),
+        arr(obj_point, wp.vec3), arr(normal, wp.vec3), 2, 2, 3, 0, .25],
+        outputs=[cost, score], device="cpu")
+    np.testing.assert_allclose(cost.numpy(), [1.09, .59, 0., 2.94, 0., .5], atol=1e-6)
+    np.testing.assert_allclose(score.numpy(), [-.2725, -.1475, 0., -.735, .7, -.125], atol=1e-6)
+    assert score.numpy()[0] < score.numpy()[1] < score.numpy()[2]
+    np.testing.assert_array_equal(body_pose.numpy(), source_poses.astype(np.float32))
+
+
+def test_alignment_weight_defaults_to_legacy_zero_and_is_bounded():
+    fields = {"release_start_frame": 407, "semantic_map_path": "/roles.npz",
+        "semantic_map_sha256": "a"*64, "semantic_reference_sha256": "b"*64}
+    assert make_semantic_contact_objective(**fields).semantic_alignment_weight == 0.
+    assert make_semantic_contact_objective(**fields, semantic_alignment_weight=.25).semantic_alignment_weight == .25
+    for weight in (-.1, 1.1, float('nan')):
+        with pytest.raises(ValueError, match="alignment weight"):
+            make_semantic_contact_objective(**fields, semantic_alignment_weight=weight)

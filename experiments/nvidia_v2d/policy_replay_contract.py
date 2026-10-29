@@ -21,7 +21,7 @@ PHYSICAL_WRIST = "experiments.nvidia_v2d.physical_wrist_config.make_sharpa_confi
 CHECKED_FIELDS = ("objective._target_", "objective.release_start_frame", "action.wrist_pos_clip",
                   "task.motion_speed", "embodiment.wrist_kp", "embodiment.wrist_kd", "task.parquet",
                   "objective.semantic_map_sha256", "objective.semantic_reference_sha256", "objective.semantic_sigma_m",
-                  "objective.semantic_motion_speed", "sim.substeps", "sim.fps")
+                  "objective.semantic_motion_speed", "objective.semantic_alignment_weight", "sim.substeps", "sim.fps")
 _MISSING = object()
 
 
@@ -89,6 +89,7 @@ def _desired_semantics(desired: Mapping[str, Any] | object) -> dict[str, Any]:
             "sim.fps": 20.0,
             "objective.semantic_map_sha256": _field(desired, "semantic_map_sha256") if semantic else None,
             "objective.semantic_reference_sha256": _field(desired, "semantic_reference_sha256") if semantic else None,
+            "objective.semantic_alignment_weight": _field(desired, "semantic_alignment_weight", 0.) if semantic else None,
             "objective.semantic_motion_speed": _number(_field(desired, "motion_speed", .5), "desired semantic speed") if semantic else None,
             "objective.semantic_sigma_m": _number(_field(desired, "semantic_sigma_m", .02), "desired semantic sigma") if semantic else None}
 
@@ -130,6 +131,8 @@ def _saved_semantics(config: Mapping[str, Any]) -> dict[str, Any]:
             "embodiment.wrist_kp": _number(kp, "saved wrist_kp"),
             "embodiment.wrist_kd": _number(kd, "saved wrist_kd"),
             "task.parquet": _reference_path(_path(config, "task.parquet")),
+            "objective.semantic_alignment_weight": _agreed([o.get("semantic_alignment_weight", 0.)
+                for o in objectives], "semantic_alignment_weight") if target == SEMANTIC_OBJECTIVE else None,
             **{f"sim.{key}": _agreed([_number(s.get(key), f"saved sim.{key}")
                 for s in _section(config, "sim")], f"sim.{key}") for key in ("substeps", "fps")},
             **{f"objective.{key}": _agreed([o.get(key) for o in objectives], key) if target == SEMANTIC_OBJECTIVE else None

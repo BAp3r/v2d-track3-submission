@@ -184,3 +184,5 @@ def test_semantic_contact_definition_cannot_reuse_old_aggregate_wrench_terms():
     assert require_replay_compatibility(spec, cfg)["status"] == "compatible"
     with pytest.raises(ValueError, match="semantic_map_sha256"):
         require_replay_compatibility(spec | {"semantic_map_sha256": "c"*64}, cfg)
+    with pytest.raises(ValueError, match="semantic_alignment_weight"):
+        require_replay_compatibility(spec | {"semantic_alignment_weight": .25}, cfg)
