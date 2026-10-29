@@ -690,3 +690,14 @@
 - official与multi-tip两路各完整完成8192 collection、4×32world正式无辅助评估及优化器更新审计；最终CHORD与共同object-only均0/32，全部失败保留。物体平均位置误差48.17cm vs18.74cm，ADD-AUC0.3460 vs0.6385；不因成功率同为0忽略实际轨迹差异。两端逐标量回读各335872训练来源值与92评估来源值完全一致。
 - 独立失败分析：两路实际物体origin抬升中位约28.8cm（非已验证COM）。官方24/32在release前首次失败；multi-tip29/32集中在runtime404–409/source10.120–10.246s，其中19/32在release407后。multi在406→407的姿态误差中位.45884→.60673rad，实际角增量.13057rad而参考.01933rad，说明有真实释放瞬间旋转/滑动，不能只归咎阈值或参考跳变。
 - 三个独立几何消融均已开始，预算配置原样；DexPilot继续训练。新比较评估器17专项测试通过，正式三路compare强制绑定全部控制步零辅助证据；历史单路允许unknown但不可混入正式对照。
+
+## 2026-10-29 — 三路同预算及独立几何消融全部完成
+
+- 六个fresh2097152训练全部成功结束；共49152条collection、24次正式检查点评估/768个world完整rollout。每个run均8192条训练、4条正式评估，SwanLab与TensorBoard各自按原始值/step（TB另含float32/walltime）逐标量回读通过。six-run-completion.json绑定各spec/checkpoint/观察器凭据，重新核验011全部保留文件和冻结代码SHA未变。此轮无新训练继续运行。
+- 主线三路全部四个固定检查点object-only/CHORD均0/32；最后2097152主结果仍固定，不挑best。实际全程平均物体位置误差官方48.17cm、DexPilot14.11cm、multi-tip18.74cm，官方姿态误差35.92°/11.46°/12.39°；ADD-AUC .3460/.6382/.6385。Dex在1572864曾有46.52m平均位置误差（含掉落后完整尾轨迹），保留中间退化，不能只凭最后误差低声称稳定。report-mainline-001保存24576原始训练行、12正式评估、loss/成功率/误差学习曲线。
+- 独立官方IK几何消融最终：raw物体0/32、CHORD0/32；normal 0/32、0/32；support 14/32、8/32；normal-support 1/32、1/32。支持参考干预改变204+目标，own-reference分数与真实物理另列，不混入原始三路排名。全部四点均保存于report-geometry-001。
+- 独立32world完整接触补录（与正式评估不同批次）：normal CHORD0/32、放稳7/32、全任务且放稳0/32；support分别15/32、24/32、12/32；normal-support分别3/32、25/32、2/32。辅助始终0、真实动作与全体接触完整保存。支撑单项带来真正完整成功，但仍未稳定；组合修复并非更优。没有把自然接触设成继续推进门槛。
+- 主线独立补录右DP持握接触占比均值官方59.49%、Dex4.34%、multi95.72%；这是bodypair接触存在，非标定承载力或自然度认证。六批各32world完整质量文件保留。三路固定world0实际视频及2×2完整对照已生成：threeway-world0-native-video-001/threeway-world0-full-actual-FAILED.mp4，496帧20fps、统一相机，未按成功选world；原片与四阶段联系图保留。
+- 派生物体四检查点曲线与独立补录物理质量分别导入双看板，明确posthoc与独立cohort；372个源标量、各端402条含附加时间记录逐值验证，HTTP5092/6006均200。原live日志未改。
+- 实现提交284778bf；464 CPU测试通过、24可选依赖跳过，Dex旧standalone运行环境9专属测试通过。新geometry helper仅清理未用import/格式，artifact source-snapshot保持原SHA。独立code review无阻塞问题，正式compare已强制全步零辅助凭据。
+- 比赛路径已实际推进到本地提交格式验证：011真实world0 public44导出NONCOMPETITIVE Parquet，496行actual pose与官方mesh编码round-trip误差0。官方packer实际因20评分episode全部缺轨迹而拒绝，保留日志；不将44改名冒充评分episode、不上传不完整结果。20段评测视频已在NAS，官方需36对象/9120模板行；后续主线是评测集覆盖及规范导出，而非等待这个锅每个接触细节完美。
