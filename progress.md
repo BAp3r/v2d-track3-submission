@@ -782,3 +782,80 @@
 - 本轮交付完整包、公开实际源码commit、六榜各一次提交、全部原始rollout/动作/接触/失败、20组双监控评估曲线。机器可读回执见full-submission-20261030-001/submission-readiness.json；页面原文/截图在kaggle-receipts/。Kaggle页面未显示数字submission ID，记录真实URL、文件名、描述、状态、分数和截图，不编造ID。
 
 - 最终CD-O返回Complete：0.51105cm，当前25/34。六榜全部评分成功、无格式/评分错误，本轮完整提交目标完成。最终官方表：AUC0.15786（33/35）、SP-SR5%（31/34）、MP-SR0%（显示34/34，同分较多）、RPE25.01154cm（31/34）、MPPE20.82605cm（30/34）、CD-O0.51105cm（25/34）。官方成功标记仅表示提交评分成功，不等于任务全部成功；暂不据排名宣布已排除重建/控制任何根因。最终JSON、页面原文和成功截图齐全，后续以此完整基线作对照。
+
+## 2026-10-30 — 官方标准复核与领先队伍公开方案检索
+
+- 只读复核当前Kaggle：AUC前五richchentw .93764、DDD .93102、Zihao Guo .88288、Purple .86964、rlwrld .86005；CD-O榜首richchentw .21280cm，第二SRL .23900cm。本队排名/分数未变化。AUC、CD-O的Discussion及Code当前均无公开条目；上述前五及SRL的Kaggle主页无bio/方案外链，网页/GitHub定向检索未找到能确认对应本次提交的技术方案。结论仅“本轮未找到”，不证明对方没有开源，不把同名作者/机构论文冒认为竞赛实现。
+- 对照实际使用的官方kit：AUC为ADD阈值1..9cm离散准确率曲线归一化积分；SP-SR用整段时间均值后跨物体平均，位置<=10cm、旋转<=0.5rad；MP-SR要求每个物体时间均值位置<3cm且旋转<30度。均不等于抓放撤手阶段任务成功率。MPPE六个5cm轴向点均误差；RPE物体对的物体系相对位移误差；CD-O经Sim(3)配准后形状Chamfer。实际轨迹仅初始共同刚体对齐，不能以CD-O低证明绝对尺度/动态轨迹正确。
+- 明显不足证据：16双体集复用03 131072步actor、4单体集复用public44 2097152步actor，无全任务训练；单体原spec motion_speed=.5且有support，而完整提交override速度1/无限ground/无support，属于迁移分布变化，其因果影响未单独量化。03训练后段episode均1.74步，matched zero/policy位置10.088/10.129cm，无改善；37首步腕偏移112/82mm，简单关ground未解决。手缺帧最近邻推断、ep10整只左手缺失、中性停放仅交付回退，非质量修复。
+- 下一步仅建议、未启动：冻结此完整官方基线，先在03/37做reset-首步动作-实际腕状态-接触的短区分实验，再比较同预算本场景训练与迁移actor；重建误差与实际控制误差分栏，保留官方IK/DexPilot-chain/multi-tip对照。抓握自然度不是训练/完整提交前置门禁。本轮新增训练0、无再次提交。
+
+- 排名澄清复核：Kaggle Track3 CD-O仍25/34、0.51105cm，这是形状单项而非总排名。官网当前Track3汇总未出现明确官方Baseline行且尚未同步本队；官网可见CARI4D(commercial) Baseline属于Track1，不能跨赛道与本队比较。尚无同口径官方Track3基线成绩证据，不能声称超越官方。
+
+### 2026-10-30 — NVIDIA Track3 汇总榜核验（GPT-6.1 Terra 子代理）
+
+- 用户指定今后查榜委派 GPT-6.1 Terra 子代理，本轮已按此执行。核查时间约05:30 UTC；官网数据快照仍为02:24:43 UTC，说明同步最多延迟24小时。Track3完整和incomplete条目均无Bap3r_681，因此尚无官网正式显示名次。
+- 官方页面及leaderboard.js显示六项指标，默认按第一项AUC降序，可点击其它指标排序；没有overall score字段，也未公布六指标加权总分公式。不能将CD-O第25名或六榜名次平均称为总排名。仅将本队AUC .15786插入当前旧快照会落在.16307与.13804之间，推算第33；明确非官方已公布排名。
+- 来源：https://nvidia-isaac.github.io/video_to_data/v2d_challenge/#leaderboard 、同目录leaderboard.js、https://raw.githubusercontent.com/MVerghese/v2d-leaderboard-data/main/leaderboard.json 。本轮只读核验，新增训练0、提交0。
+
+### 2026-10-30 — 注册队伍与Kaggle关联审计（GPT-6.1 Terra）
+
+- Gmail只读核实2026-10-22 06:05 UTC Google Forms回执：注册队伍FMC3 Robotics，选择Track3；回执未列Bap3r_681，不能据此确认Kaggle关联。10月26日主办邮件指出报告及最终表截止11月4日17:00 EST。
+- 主办最终提交表 https://forms.gle/5Nvdx5iByESR8sxw8 要求Registered team name与注册表及leaderboard队名完全一致，Kaggle team ID可选，Final leaderboard submission IDs or URLs必填且须在Kaggle标记同一最终提交，另需报告PDF、repo和精确commit。当前注册名FMC3 Robotics与榜上Bap3r_681不一致；最终关联/审核完成无证据，不能把六榜评分成功等同全部正式参赛交付完成。本轮未填写表、改队名或发送邮件。
+- 官方Track3页面提供可选端到端baseline，但本轮未找到明确的官方baseline AUC/SP-SR数值；本地official标签仅指官方IK，不是完整官方方法复现。本队16双体集复用03短训练actor、4单体集复用44 actor，且已有短episode/迁移失败证据，因此当前低分不能归因于官方baseline上限。
+
+- Kaggle队伍现场复核（Terra只读）：六场AUC/SP-SR/MP-SR/RPE/MPPE/CD-O的Team页面当前均为Bap3r_681，唯一成员Bap3r_681 (You)，Team Leader，无待收邀请。用户提到已创建FMC3 Robotics group，但这六场当前队伍均未显示该名称，group具体位置/账号未知。本次六榜使用已登录浏览器提交，没有选择API token；现有证据指向逐比赛队伍归属/名称需核对，不能断言token错误。未改名、合并或重新提交。
+
+### 2026-10-30 — 六榜参赛队名已统一为FMC3 Robotics
+
+- 用户提供https://www.kaggle.com/groups/fmc3-robotics；Terra浏览器核实为Private Group，当前唯一成员/Owner为Bap3r_681。Group与每场competition Team分别维护，创建group未自动变更比赛队名。
+- 按修复注册名称匹配意图，在六场原有单人Team中分别保存Team Name=FMC3 Robotics。六场排行榜均实际回读新队名、成员Bap3r_681、各1 entry且原分保留：AUC.15786、SP-SR.05000、MP-SR.00000、RPE25.01154、MPPE20.82605、CD-O.51105；CD-O当前26名，名次动态变化。未创建/合并队伍、未重新提交、未修改token。
+- 已解决注册队名与Kaggle显示名不一致；NVIDIA官网同步和最终报告/提交表仍需单独完成，不能据改名宣称主办审核或最终交付已完成。
+
+### 2026-10-30 — 完整进展/实验/视频/评分报告交付
+
+- 新报告experiments/nvidia_v2d/TRACK3_PROGRESS_REPORT_20261030.md汇总实现状态、两路早期三seed、局部finite-training链、三路等预算及独立几何消融、原chain短实验、03训练、正式20集、视频/CSV/loss/checkpoint及赛事交付缺口；明确official IK不等于完整官方baseline。Terra分别核官方评分源码及媒体/数值。
+- 新增只读事后统计：精确读取本次正式提交20份diagnostic.npz，对各集全帧actual与重建参考均位置误差逐集等权平均25.6809cm；ep14 66.21cm、ep33 40.36cm、ep03 10.14cm、ep37 12.95cm。不是官方隐藏GT分数。CSV/图/源码/全部输入SHA保存在progress-report-20261030-001；全部20集逐步辅助0复核。
+- 漂移证据按参考深度时序、首步控制偏移、释放滑动/支撑、长尾掉落、迁移覆盖和配置差异分栏，不声称已找到统一根因。额外确认正式双体物理100Hz、单体200Hz、控制均20Hz；与历史半速有限support条件不同，因果未隔离。
+- 官方指标精确说明：ADD-AUC阈值1..9cm严格<、九点归一化梯形积分而非简单均值；SP时间及物体均值<=10cm/0.5rad；MP每物体时间均值严格<3cm/30deg；RPE物体系相对位置且单物体记0；MPPE六点5cm；CD-O双向平均最近邻距离及独立尺度配准。五pose按episode均值，CD-O按episode-object均值；自然抓握单列。
+- 40个报告本地链接均存在；图已目视检查；SwanLab5092/TensorBoard6006均HTTP200。正式20集actual完整保存但未全渲染视频，报告明确既有03视频属独立诊断、public44不在20集名单；早期缺loss不补造。本轮新增训练0、提交0，未改用户reconstruction文件。
+
+- 数据来源澄清：本轮任务视频来自NAS的nvidia/video_to_data_challenge/track_3；public44用于主要开发/策略训练，evaluation03也用于策略短训练，正式20集来自evaluation。尚无独立构建的严格留出策略测试集，不能把这套结果称为纯未见任务泛化；03存在训练/评测视频重合但未使用隐藏GT监督。SAC实际训练样本是仿真采集transition，重建结果/本地副本不是新独立数据集；预训练感知模型权重来源另计。
+
+### 2026-10-30 — 扩展数据的判断与候选（未开新实验）
+
+- Terra核官方来源：HOT3D有多视角、3D手/相机/物体位姿及扫描mesh，适合先做重建与控制瓶颈诊断；没有默认连续接触力/机器人动作。Ego4D Hands & Objects主要关键时刻2D框/状态变化，不是现成连续3D手物训练轨迹，当前直接接入收益低、成本高。来源https://facebookresearch.github.io/hot3d/ 、https://github.com/facebookresearch/hot3d/blob/main/hot3d/clips/README.md 、https://ego4d-data.org/docs/benchmarks/hands-and-objects/ 。
+- 已检查仓库真实实现，已有HOT3D loader、分段流程、hot3d_to_sharpa.py与HOT3D_SETUP.md；因此不是从零接入，但不代表当前Sharpa SAC actual闭环已验证。加载器30Hz、Quest Y-up→Z-up、MANO PCA与wxyz等转换需要沿用正确契约。
+- 决策建议：近期先增加现有V2D任务训练覆盖/短控制审计，再用4–8个HOT3D训练片段作标注参考vs重建参考的冻结物理对照；支持重建瓶颈才扩大重建训练，标注参考仍首步偏移/早停则回控制。Ego4D用于以后视觉/VLA泛化，暂不大规模下载混训。该方案仅提议，新增训练0/下载0。数据按视频/人物/物体划留出，先有未见片段收益才扩容；HOT3D真值mesh不替换V2D评测重建mesh。
+
+### 2026-10-30 — ACE-Ego-Hand支线接入复核与报告补正
+
+- 新报告experiments/nvidia_v2d/ACE_INTEGRATION_AUDIT_20261030.md。此前总报告漏列ACE；此前仅V2D数据说法限本轮竞赛policy，重建支线实际使用自采纸箱4581帧/152.7秒。找回10/23失效对照及10/26修正版原始report、native pickle/视频和最终result。
+- NVIDIA官方hamer模式是WiLoR+SAM2+HaMeR，基础WiLoR也可独立输出MANO。本地ACE完整pose替换与仅hand_detector提示替换需区分。旧导出漏MANO mean，同一frame2400右手均/最大顶点差31.125/90.254mm；10/26修正v2并重跑匹配/对齐/插值/result/Three.js。当前导出cache实际校验True；读取修正版NPZ确认4581帧，左/右valid3703/2939（包含填补，不是GT精度）。
+- 新只读样本核对：frame2400右手native Z.488835m→pre-dz.536384m→aligned.636530m，dz.100146m、三维位移改变量150.43mm，fx689.178→756.134，保留depth/scale后处理。不能直接判全错，但原生ACE质量不足以证明最终参考正确，需后处理独立对照。
+- ACE→Sharpa→SAC/实际rollout及正式20集无验证结果，不能用当前六榜成绩判断ACE；未找到GT精度或跨片段对照。下一步提出03/37冻结物体/共同相机的WiLoR vs corrected ACE四层对照，尚未运行。新增训练0/下载0，未改用户ACE/重建代码。
+
+### 2026-10-30 — Windows ACE原生实验与论文benchmark口径核实
+
+- 用户指定NAS /home/fmc3/FermiBotNas/tmp/ACE-Ego-Hand，实际检出3段完整Windows K-given实验及原生渲染。与Linux 10/23 adapter实验分开；不把漏MANO mean错误套到Windows结果。忽略CRLF后viz_preds/mano_utils与该HEAD无实质差异，主要为显存/流式编码兼容改动。
+- Terra复核论文S4：ARCTIC in-view MPJPE WiLoR22.775/ACE15.423mm、HOT3D30.921/12.703mm；in-view不是无遮挡，主表-p有漏检惩罚、PA有对齐，不能推导所有清晰可见手指更自然。不能将全部优势归因OOS；用户无遮挡WiLoR更合理观察须单独分层，不被论文平均数否定。
+- ACE专项报告追加Windows来源、现有结果与对照缺口；当前无该Windows批次WiLoR配对数据/3DGT。新增训练0，未改NAS文件/代码。
+
+### 2026-10-30 — 用户补充ACE/WiLoR分场景观察
+
+- 用户对自有实验的直接观察：戴手套时只有ACE能稳定输出手腕6DoF及手指姿态；握持物体时两者各有优势，ACE更多手指形态符合直觉，WiLoR可见部分贴合更好，腕部6DoF轨迹也更贴合。此为用户视觉/执行观察，尚非3DGT精度或统计benchmark，不能简化成无遮挡WiLoR/遮挡ACE的二选一。
+- 方法假设更新：分开评估手存在覆盖、腕部平移/旋转、可见指关节和遮挡关节；以可靠WiLoR观测约束ACE补全为候选，WiLoR失效的手套段由ACE整体提供。不直接混不同相机/尺度/局部坐标下参数，不把两个网络confidence数值当可比较精度。此方案未实现、未运行，保留纯两路基线。新增训练0。
+
+## 2026-10-30 — 静态基线诊断与质量门禁拆除
+
+- 事后只读统计（无新训练）：正式提交20集actual相对重建参考均误差25.68cm，而“物体始终停在第0帧”的静态基线为17.96cm；仅5/20集actual优于静态。单体35/36/37/38实际物体位移仅0.7–1.3cm，即未被抓起。控制是当前首要瓶颈；DROID-SLAM已在提交重建中使用（`camera_to_world_dir=slam_poses`），ego双目cam_b/c与public集Vicon物体真值尚未使用。
+- ACE vs WiLoR（03/37）对照已移交独立会话执行，结果另记。
+- 按用户要求拆除质量类门禁，保留有效性阻断（身份/视频哈希、非有限值、刚体、缺失帧、无辅助、相机共享、相对变换保持、输入哈希不变）：
+  - `sharpa_episode.audit_bundle`：插值长度/单端插值、外推帧不再阻断，只计入source_counts。
+  - `sharpa_calibration.validate_source_hand`：允许已标注外推(code 3)；缺失/拒绝帧仍拒绝。
+  - `sharpa_bridge_geometry`：无可信观测时用有效帧估计尺度，不再报错；`sharpa_bridge`：beta中值来源不符时回退到质量束provenance。
+  - `sharpa_geometry_audit.build_training_gate`：training_ready只由数值契约决定，不再要求purpose=mechanism_validation；几何质量仍标unknown。
+  - `policy_gate.verify_gate`：去掉purpose/geometry_quality_accepted/仅official锁；repair gate只要求finite_arrays/frame_count/unchanged_auxiliary_and_physics，接触法向/支撑/机器人接触映射/释放间隙/碰撞并集/时序连续性改为记录项。
+  - `ExperimentSpec.purpose`可为policy_quality；训练墙时上限7200s→172800s（budget、run、sweep docker wait、experiment内7100s限制移除）。
+- 验证：tests/experiments 469 passed/24 skipped（同步修改了9个固定旧门禁的断言）；inputs-002全部36个真实对象束非delivery模式下审计均通过（此前需delivery旁路）。
+- 未改：policy_publish中public44/249帧/2,097,152步冻结对照校验（仅用于历史sweep发布，不挡新训练）；Adam生效更新与VOC=0检查（属“辅助冒充无辅助”与“训练是否真实发生”的有效性检查）。
