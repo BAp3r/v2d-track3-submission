@@ -710,3 +710,40 @@
 - 腕局部最大单帧指尖位移左209→210约103mm、右拇指210→211约59mm；仅标记动态异常候选，快速真实张手与模糊仍需区分。输入/基线未修改，自然抓握仍不作为比赛主线前置门槛。SwanLab5092和TensorBoard6006实测HTTP200，既有loss/评估曲线保留。
 - 更新：episode37已完成真实CPU桥接episode37-bridge-004、官方IK episode37-official-001及scene-001导出（151帧）；前三次依赖/挂载失败收据保留。修复ExperimentSpec的硬编码episode身份，新增显式episode_id并用于gate和launch记录，兼容历史public44默认；37必须按真实ID验证。相关40测试通过、2可选项跳过。源RGB/MANO全片对照已生成并完整解码验收（249帧20Hz）；GPU当前其它评测作业占用约38GB，未启动冲突训练。
 - episode37 CPU最终产物改为official-002、training-gate-002、scene-002（以browser-submission目录EPISODE37_READY.md为准）；新显式episode身份入口实际验证通过，绑定10份文件哈希。训练配置已保存2097152步/256world/seed42/native speed1/world0评估。仍未开训、无actual rollout：还需整合runtime-assets/upstream只读挂载与双监控启动器，并避开当前GPU其它任务；全20集有效提交仍缺，未对外上传。不要把CPU就绪当作正式提交或无辅助成功。
+
+## 2026-10-29 19:04 +08 — Track3预算内只读诊断与短实验预登记
+
+- 根目录原无AGENTS.md，已按用户全文新增。4h预算从18:57:17开始、最晚22:57:17；不新增长训练。phase1-diagnosis.md保存只读诊断、四环节瓶颈、三项预算/假设/停止条件，目录`.e2e/zero_success_20261027/track3-reset-20261029-001`。
+- 关键更正：相邻Dex_Teleop_demo实际存在dexpilot-calibrated及chain_optimizer.py原方向链/分指权重/伸指先验实现；此前Sharpa三路的DexPilot是链向量重建版，不能代表该原chain已验证。保留旧数据，增加明确方法身份。
+- 官方20评分集尚缺实际checkpoint/rollout，public44不在名单；已读分享讨论全文。先核03锅勺/19扫具共同坐标，再做37等短离线/执行性诊断，不以自然接触完美作为覆盖前提。
+- 用户明确轻量子任务使用6.1 Sol/Terra；仅委托找文件/提取数值/明确小脚本，方法取舍由主进程负责。
+
+## 2026-10-29 19:22 +08 — Track3短实验完成：停止单锅局部迭代，优先共同场景/评分集交付
+
+- 根目录AGENTS.md已按用户全文写入；完成只读诊断后执行短实验，新增长训练0。完整报告`experiments/nvidia_v2d/TRACK3_RESET_20261029.md`，证据根`.e2e/zero_success_20261027/track3-reset-20261029-001`。18:57开始、本轮约25分钟，未用满4h；所有诊断GPU容器已退出，原双看板仍运行。
+- 更正此前“原chain找不到”：本地Dex_Teleop_demo含dexpilot-calibrated及真实chain方向/分指权重/伸指先验源码。原class显式适配Sharpa、同calibration，和旧rebuilt-chain分开；两片段×五方法10份参考，45个非robot字段各自逐值一致，20行独立NPZ统计保存。37右tip均误差official7.97/multi4.99/rebuilt7.53/originalchain9.33mm；无越限，不据离线误差宣布胜出。
+- 多物体03锅勺/19扫具的共同camera变换逐值相同，但独立job手腕差异最大约122/105mm。实际调用当前单对象PCA bridge作因子对照：各自对齐再拼接会产生相对中心均偏差33.62/33.34cm，相对旋转19.55/136.31°；共享一次scene变换保持关系至数值精度。这是重建参考坐标代理，不是官方RPE或已观察到的多物体actual失败。多对象物理adapter仍缺，统一手源/共同scene为下一轮首选。
+- 成功完成11组短物理（每组4world，37原速151步、44原有限桌面半速496步）共12,164个world-control transitions；失败尾轨迹、全shape/actions/state及三次启动/旧407配置拒绝均保留。37五法zero均0/4、完整手shape物体接触0/604，实际物体均误差约13.052cm；public44四法zero均0/4但物体运动/接触有差异，见physics-summary，不混为learned成绩。
+- 37初始腕精确reset但首步垂向偏移112/82mm，单独过滤robot-ground只把左降至97mm、右不变，无接触/物体改善，推翻“关掉地面即解决”的强假设；根因其余分量未知。冻结public44 actor在37的真实无辅助zero-shot为0/4，接触仅2/1/2/1帧，位置12.954cm/姿态.379rad（zero .149），不能称迁移改善。没有据此启动长训练或继续补奖励。
+- 真实37/world0已导出candidate37-local-only-attempt2/results/episode_000037.parquet及原body系木勺STL；官方kit读取器151帧actual pose round-trip误差0，源0..7.5s20Hz、辅助逐步0。此为1集本地actual诊断导出、非37训练成功/正式提交；剩余19集与完整36mesh/9120行/commit/provenance/packer仍缺。无上传、无官方分数、无假轨迹。
+- 可证历史新增训练成本30,813,184环境步、120,364collection，67次正式评估/1792world；六fresh并发墙时并集44.01分钟，run耗时相加136.44分钟，两者分列。迁移前缺日志及全部离线/人工成本未知，统计是下界。support独立消融有真实全任务且放稳0→12/32收益；法向normal仍0/32，原chain几何误差也未改善37物体运动。官方隐藏GT六指标全部未知。
+- 本轮3041控制时刻、18,246个派生源指标值保存独立diagnostic_posthoc系列，横轴明确control step而非训练进度；SwanLab/TB逐step/value双端回读all_scalars_verified=true，非有限0，5092/6006 HTTP200。原训练loss/失败/检查点曲线保留。基线before/after的11产物+65代码SHA全部匹配。脚本语法和git diff whitespace检查通过。
+- 方法决策：继续既有重建→重定向→FlashCHORD架构；不全面换原chain/DONIC，不继续锅的碰撞面/腕奖励局部纠错。下一轮最多三项：03共同多物体scene→实际输出/官方reader；37 reset/动作目标/状态及有限支撑一致性短审计；待有区分信号后才在代表样本做少量等预算方法训练。自然抓握、放稳、撤手与官方评分分栏。
+
+## 2026-10-30 — 双物体覆盖与定向开源方法检索
+
+- 按用户优先级推进03共同双物体场景；预登记coverage-20261030-001/preregistration.md覆盖输入/重定向/控制/交付四环节与预算/停止条件。旧基线、用户reconstruction改动保留。
+- 新sharpa_multi_object按真实对象身份/源SHA/帧数/共享camera验证，固定white_pot的手源与一次scene变换，装配锅+勺313帧。桥接002相对SE3误差4.44e-16，contact body IDs左845锅/0勺、右11锅/1256勺slot时刻；仅启发式。001在最终gate序列化因共享dict循环引用失败，保留目录后修复重跑。官方IK真实完成，两体物理smoke4world×313步/辅助0/全部finite，接触帧72/81/74/71；仍0/4本地CHORD、位置9.774cm/角39.04°，非学习策略成绩。
+- 首次03物理诊断被旧单体actor obs504→722拒绝，保存失败；后续zero诊断显式不加载actor，不称learned。新增短训练预登记131072步/64world/seed42、两个checkpoint/4world无辅助评估、1200秒限时；单因素控制对照零残差，目标首先是匹配观测的新actor实际更新与规范输出。继续完整保存loss/评估/双监控。
+- 检索结果和最小对照/淘汰表写入TRACK3_METHOD_SEARCH_20261030.md：SPIDER有实际物理采样代码，作为优先外部候选；DexMachina/ManipTrans有实现但需不同runtime；C2Dex核心代码仍TODO，CARD代码/权重尚未核实。不把论文宣传指标当本项目结果。
+- 37旧原始joint target与参考首步Z相等，实际q偏移：排除目标clip改写，动力学完整根因仍未知。修复训练入口第二处public44固定249帧检查，改为与实际gate帧数比较，并提供预算内checkpoint间隔；25相关测试通过、2可选跳过。
+
+### 2026-10-30 — 03短训练、全程无辅助实际输出与官方缺集检查完成
+
+- 完整报告`experiments/nvidia_v2d/TRACK3_COVERAGE_20261030.md`，方法候选/原始论文/真实开源状态见`TRACK3_METHOD_SEARCH_20261030.md`。本轮03已实现→运行→验证；外部SPIDER/CHOIR仅候选，未声称已接入。
+- 双物体313帧官方IK经数值/几何机制审计后完成131072步/64world/seed42短训练；checkpoint65536/131072各4world无辅助全片评估均0/4。最终正式位置10.120cm、角31.799°、ADD-AUC代理.24700；锅4.915cm/勺15.324cm。全部本地参考代理，官方六指标未知。
+- 排除物理配置混淆后，额外同新checkpoint配置zero/policy各4world完整捕获：位置10.088/10.129cm，角30.887/31.849°，AUC代理.25509/.24735，均0/4；学习改善假设不被本预算支持，按停止条件不追加训练。末1/4训练episode均长1.74步，控制/参考可执行性需下一轮方法对照。
+- Adam审计实更新actor7155、critic14308，2048训练记录/2正式评估曲线，非有限记录0；SwanLab和TensorBoard两端训练/评估逐值回读验证全部通过。训练144.09秒+审计/两评估总185.01秒；matched两组约29.94/29.72秒，全部失败world/日志/权重保留。
+- 03双物体固定world0 actual导出626行、原body系两STL，官方reader round-trip误差0。加旧37 zero-shot实际导出，本地覆盖1→2/20；官方packer实际拒绝还缺18集，未上传/无官方排名分数。新文件`candidate03-local-only-001/receipt.json`与`partial-roster-check-001/packer.log`保留完整凭据。
+- 新固定world0完整视频313帧20Hz及联系图在`visual03-world0-002/`；实际捕获右手—勺仅9/9/15/11接触帧，双拇指接触0，非承载力证据。手靠近/经过物体不等于稳定抓取；此为03，与此前44分开。第一次渲染asset路径失败亦保留。
+- 定向查到Open-CHOIR有stage2抓握深度修正+stage3时序拟合实际代码/权重说明，但双手双体主要拆分两路拟合，不能天然保证共同frame；加入重建侧最小对照。已有Dyn-HaMR/WiLoR入口先核版本，避免重复接入。43相关测试通过、2可选跳过；旧基线与用户reconstruction改动保留。

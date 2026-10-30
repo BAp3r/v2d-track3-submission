@@ -203,3 +203,13 @@ def test_explicit_episode_identity_reaches_gate(monkeypatch):
     assert seen == ['track_3-evaluation-episode-000037']
     with pytest.raises(ValueError, match='视频编号'):
         require_experiment_gate(sample_spec())
+
+
+def test_bounded_checkpoint_cadence_does_not_change_training_budget():
+    spec=sample_spec(checkpoint_interval=512)
+    args=training_argv(spec)
+    assert 'training.checkpoint.save_interval_environment_steps=512' in args
+    with pytest.raises(ValueError,match='complete collection'):
+        sample_spec(checkpoint_interval=511)
+    with pytest.raises(ValueError,match='midpoint'):
+        sample_spec(checkpoint_interval=256,verify_resume=True)

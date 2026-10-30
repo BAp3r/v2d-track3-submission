@@ -70,6 +70,7 @@ class ExperimentSpec(BaseModel):
     seed: int
     purpose: Literal["mechanism_validation"] = "mechanism_validation"
     verify_resume: bool = False
+    checkpoint_interval: int | None = Field(default=None, gt=0)
     replay_capacity: int = Field(gt=0)
     replay_minimum: int = Field(gt=0)
     replay_batch: int = Field(gt=0)
@@ -89,6 +90,12 @@ class ExperimentSpec(BaseModel):
             raise ValueError("预算必须包含真实参数更新")
         if self.verify_resume and (self.budget.total_steps // 2) % self.budget.world_count:
             raise ValueError("恢复校验的中点必须为完整采集批次")
+        if self.checkpoint_interval is not None:
+            if (self.checkpoint_interval > self.budget.total_steps
+                    or self.checkpoint_interval % self.budget.world_count):
+                raise ValueError("checkpoint interval must fit the budget and contain complete collection batches")
+            if self.verify_resume and self.checkpoint_interval != self.budget.total_steps // 2:
+                raise ValueError("resume verification requires a midpoint checkpoint")
         return self
 
 
@@ -102,7 +109,7 @@ def training_argv(spec: ExperimentSpec) -> list[str]:
         voc_scales=VOC_SCALES,
     )
     args = [arg for arg in args if not arg.startswith("training.checkpoint.save_interval")]
-    interval = (
+    interval = spec.checkpoint_interval or (
         spec.budget.total_steps // 2
         if spec.verify_resume
         else max(
@@ -371,10 +378,10 @@ def run_inside_container(spec: ExperimentSpec, output: Path = Path("/run")) -> d
         return audit
 
     try:
-        require_experiment_gate(spec)
+        gate = require_experiment_gate(spec)
         reference = load_reference(str(spec.parquet), control_fps=20.0, motion_speed=1.0)
-        if reference.num_frames != 249 or reference.fps != 20:
-            raise ValueError("public44时间轴被隐式修改")
+        if reference.num_frames != gate['frame_count'] or reference.fps != 20:
+            raise ValueError("reference time grid differs from the verified episode gate")
         record["reference"] = {
             "frames": reference.num_frames,
             "fps": reference.fps,
