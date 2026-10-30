@@ -762,3 +762,21 @@
 - 本地CHORD仍0/20，属重建参考代理，未声称稳定成功或官方分数改善。手缺帧推断和完全缺手的中性停放明确留在provenance；不作为隐藏真值或已验证自然抓握。完整覆盖由上一轮2/20提升至20/20。
 - 未修改官方packer与uploader，实际通过完整名册/mesh/字段校验；主包track3_submission.parquet为2,842,400字节/9,120行，CD-O派生包4,064,212字节/294,912点。精确SHA与校验器SHA见full-submission-20261030-001/submission-readiness.json。20个评估系列SwanLab及TensorBoard逐标量回读全部通过，既有训练loss/checkpoint保留；完整实际执行凭据见complete-evidence.json。
 - 准备独立31文件公开源码快照，实际commit c3e975141a3a5a5c497ecdbdf9fd99fe6b7facb7；不含本仓库旧历史/视频数据/权重/用户无关改动。用户现已明确授权公开该代码包并接受六场Kaggle规则；浏览器继续执行创建仓库、加入六榜、上传。当前尚未取得正式提交回执，不报已提交或排名。
+
+- 已按用户明确授权创建Public仓库并SSH发布最小源码快照；匿名web读取实际commit c3e975141a3a5a5c497ecdbdf9fd99fe6b7facb7 成功，官方包所绑定的代码URL现已公开可达。当前工作区实现已提交87132f30；浏览器正在六榜入赛/上传。
+
+- 实际首次AUC浏览器上传被fileChooser.setFiles拒绝：ChatGPT扩展未开启Allow access to file URLs。AUC规则已接受，但尚无上传/提交ID。本机Kaggle API环境和标准凭据均不存在；不生成或显示新token。已请用户开启此具体本地文件权限，等待回复期间继续接受其余已授权规则。该阻断来自浏览器实际工具错误，不是质量门槛。
+
+- 用户已回复“已开启，继续上传”，Edge扩展文件权限阻断进入重试；浏览器连接因权限更新重新发现，继续执行六榜提交。
+
+- Edge权限已生效；首个SP-SR正式提交记录已在Kaggle Submissions页出现，文件track3_submission.parquet、状态Pending，非仅本地校验。其余五榜继续上传，评分尚未知，不声称六榜全完成。
+
+- AUC、MP-SR也已在Kaggle出现正式Pending记录，当前3/6榜确认接收，无上传错误。仍继续RPE、MPPE、CD-O；不把Pending报成评分成功。
+
+- 六榜全部已产生正式Kaggle提交记录：AUC/SP-SR/MP-SR/RPE/MPPE使用完整actual pose包，CD-O使用官方派生网格包。每榜各一次，无重复提交。浏览器子代理因服务容量中断后主代理接续MPPE/CD-O并完成核验。RPE已Complete：25.01154cm，当前31/34；AUC已Complete：0.15786，当前33/35。其余结果继续读取；所有排行榜名次均暂时性，非奖项认证。
+
+### 2026-10-30 — 全量六榜提交已完成，首批官方分数返回
+
+- 官方评分成功：AUC 0.15786（33/35）；SP-SR 0.05000即5%（31/34）；MP-SR 0.00000（显示34/34，与多队同分）；RPE 25.01154cm（31/34）；MPPE 20.82605cm（30/34）。名次为此次读取时Kaggle各榜显示顺序，不能合成一个总排名。CD-O已正式Pending，仍等待形状配准评分。
+- 这是首次取得完整20集/36对象actual无辅助基线的官方评分，不能同此前本地CHORD或ADD代理作直接升降对比。SP-SR非零而MP-SR为0，说明阈值/指标口径不同；不据此声称自然抓握或稳定抓放。当前最应投入的下一轮瓶颈是控制/参考可执行性和重建误差的区分，不追加单锅接触完美门禁。
+- 本轮交付完整包、公开实际源码commit、六榜各一次提交、全部原始rollout/动作/接触/失败、20组双监控评估曲线。机器可读回执见full-submission-20261030-001/submission-readiness.json；页面原文/截图在kaggle-receipts/。Kaggle页面未显示数字submission ID，记录真实URL、文件名、描述、状态、分数和截图，不编造ID。
