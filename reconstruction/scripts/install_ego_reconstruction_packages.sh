@@ -32,6 +32,7 @@ echo "Installing host packages for ego reconstruction..."
   -e modules/v2d_sam2/docker \
   -e modules/v2d_sam3d/docker \
   -e modules/v2d_wilor/docker \
+  -e modules/v2d_ace_hand/docker \
   -e modules/v2d_pipelines
 
 echo "Done. Next: build Docker images with ./scripts/build_ego_reconstruction_packages.sh"

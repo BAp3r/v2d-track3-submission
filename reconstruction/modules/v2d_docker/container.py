@@ -79,6 +79,14 @@ def run_in_container(
         if modules_dir is None:
             raise ValueError("modules_dir must be provided when dev=True")
         cmd += ["-v", f"{modules_dir}:/workspace"]
+    # Optional read-only asset roots make local NAS symlink layouts usable
+    # inside containers without copying checkpoints or changing NAS contents.
+    for asset_root in os.environ.get("V2D_READONLY_MOUNTS", "").split(os.pathsep):
+        if asset_root:
+            asset_root = str(Path(asset_root).resolve(strict=True))
+            if not os.path.isdir(asset_root):
+                raise ValueError(f"Read-only asset root must be a directory: {asset_root}")
+            cmd += ["-v", f"{asset_root}:{asset_root}:ro"]
     if extra_volumes:
         for vol in extra_volumes:
             cmd += ["-v", vol]

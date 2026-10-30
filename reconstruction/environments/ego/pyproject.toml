@@ -1,0 +1,50 @@
+[project]
+name = "v2d-ego-environment"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "v2d-common",
+    "v2d-docker",
+    "v2d-depth",
+    "v2d-anycalib-docker",
+    "v2d-geocalib-docker",
+    "v2d-droid-slam-docker",
+    "v2d-ego-hand-reconstruction-docker",
+    "v2d-foundation-pose-docker",
+    "v2d-grounding-dino-docker",
+    "v2d-gsplat-refinement-docker",
+    "v2d-hamer-docker",
+    "v2d-hand-alignment-docker",
+    "v2d-hawor-docker",
+    "v2d-mediapipe-docker",
+    "v2d-moge-docker",
+    "v2d-sam2-docker",
+    "v2d-sam3d-docker",
+    "v2d-wilor-docker",
+    "v2d-ace-hand-docker",
+    "v2d-pipelines",
+    "Pillow",
+    "scipy>=1.13,<2",
+]
+
+[tool.uv.sources]
+v2d-common = { path = "../../modules/v2d_common", editable = true }
+v2d-docker = { path = "../../modules/v2d_docker", editable = true }
+v2d-depth = { path = "../../modules/v2d_depth", editable = true }
+v2d-anycalib-docker = { path = "../../modules/v2d_anycalib/docker", editable = true }
+v2d-geocalib-docker = { path = "../../modules/v2d_geocalib/docker", editable = true }
+v2d-droid-slam-docker = { path = "../../modules/v2d_droid_slam/docker", editable = true }
+v2d-ego-hand-reconstruction-docker = { path = "../../modules/v2d_ego_hand_reconstruction/docker", editable = true }
+v2d-foundation-pose-docker = { path = "../../modules/v2d_foundation_pose/docker", editable = true }
+v2d-grounding-dino-docker = { path = "../../modules/v2d_grounding_dino/docker", editable = true }
+v2d-gsplat-refinement-docker = { path = "../../modules/v2d_gsplat_refinement/docker", editable = true }
+v2d-hamer-docker = { path = "../../modules/v2d_hamer/docker", editable = true }
+v2d-hand-alignment-docker = { path = "../../modules/v2d_hand_alignment/docker", editable = true }
+v2d-hawor-docker = { path = "../../modules/v2d_hawor/docker", editable = true }
+v2d-mediapipe-docker = { path = "../../modules/v2d_mediapipe/docker", editable = true }
+v2d-moge-docker = { path = "../../modules/v2d_moge/docker", editable = true }
+v2d-sam2-docker = { path = "../../modules/v2d_sam2/docker", editable = true }
+v2d-sam3d-docker = { path = "../../modules/v2d_sam3d/docker", editable = true }
+v2d-wilor-docker = { path = "../../modules/v2d_wilor/docker", editable = true }
+v2d-ace-hand-docker = { path = "../../modules/v2d_ace_hand/docker", editable = true }
+v2d-pipelines = { path = "../../modules/v2d_pipelines", editable = true }

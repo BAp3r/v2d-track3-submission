@@ -106,7 +106,8 @@ def _silhouette(
     focal = rec["camera"]["focal_length"]
     z_max = float(verts_cv[:, 2].max())
     zfar = max(50.0, z_max * 1.5)
-    cam = pyrender.IntrinsicsCamera(fx=focal, fy=focal, cx=W / 2, cy=H / 2,
+    k = rec["camera"].get("intrinsics", {"fx": focal, "fy": focal, "cx": W / 2, "cy": H / 2})
+    cam = pyrender.IntrinsicsCamera(fx=k["fx"], fy=k["fy"], cx=k["cx"], cy=k["cy"],
                                     znear=0.01, zfar=zfar)
     scene = pyrender.Scene(bg_color=[0, 0, 0, 0], ambient_light=[1, 1, 1])
     scene.add(cam, pose=np.eye(4))

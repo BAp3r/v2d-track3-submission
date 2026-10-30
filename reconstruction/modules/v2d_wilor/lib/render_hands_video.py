@@ -130,18 +130,19 @@ def render_hands_video(
         raise FileNotFoundError(f"No frames in {frames_dir}")
 
     records = _frame_records(wilor_dir)
-    if not records:
+    if not any(records.values()):
         raise FileNotFoundError(f"No WiLoR JSONs in {wilor_dir}")
 
     mano = _mano_layer(mano_assets_root)
 
     W, H = Image.open(frame_files[0]).size
-    first_rec = next(iter(records.values()))[0]
+    first_rec = next(recs[0] for recs in records.values() if recs)
     focal = first_rec["camera"]["focal_length"]
     z_max = max(rec["camera"]["cam_t"][2]
                 for recs in records.values() for rec in recs)
     zfar = max(50.0, float(z_max) * 1.5)
-    cam = pyrender.IntrinsicsCamera(fx=focal, fy=focal, cx=W / 2, cy=H / 2,
+    k = first_rec["camera"].get("intrinsics", {"fx": focal, "fy": focal, "cx": W / 2, "cy": H / 2})
+    cam = pyrender.IntrinsicsCamera(fx=k["fx"], fy=k["fy"], cx=k["cx"], cy=k["cy"],
                                     znear=0.01, zfar=zfar)
     renderer = pyrender.OffscreenRenderer(viewport_width=W, viewport_height=H)
     font = _font(18)

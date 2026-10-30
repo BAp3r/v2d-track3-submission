@@ -96,6 +96,7 @@ Usage:
 Run from reconstruction/.
 """
 
+from pathlib import Path
 import argparse
 import glob
 import json
@@ -665,6 +666,14 @@ def run_ego_wilor(
     refinement_second_pass_epochs: int | None = None,
     refinement_second_pass_batch_size: int | None = None,
     dev: bool = False,
+    hand_detector: str = "wilor",
+    ace_weights: str = "data/weights/ace_hand",
+    ace_backbone: str = "data/weights/wan_control",
+    ace_mano: str = "data/weights/hand/mano",
+    ace_cache: str = "data/ace_cache",
+    skip_hand_overlays: bool = False,
+    ace_input_intrinsics: str | None = None,
+    ace_native_predictions: str | None = None,
 ) -> None:
     video_path = os.path.abspath(video_path)
     output_dir = os.path.abspath(output_dir)
@@ -877,16 +886,74 @@ def run_ego_wilor(
                 dev                   = dev,
             )
 
-    # 3. WiLoR over all frames -----------------------------------------------
-    if not _step("WiLoR per-frame detection + MANO",
-                 _has_files(wilor_raw_dir) and
-                 os.path.exists(os.path.join(wilor_raw_dir, f"{reference_frame:06d}.json"))):
-        run_wilor_video(
-            video_path  = video_path,
-            output_dir  = wilor_raw_dir,
-            weights_dir = wilor_weights,
-            dev         = dev,
-        )
+    # ACE replaces WiLoR detection/MANO while preserving the downstream contract.
+    if hand_detector not in {"wilor", "ace"}:
+        raise ValueError(f"Unknown hand detector: {hand_detector}")
+    detector_marker = Path(output_dir) / "hand_detector.json"
+    previous_detector = {}
+    if detector_marker.exists():
+        previous_detector = json.loads(detector_marker.read_text())
+        previous = previous_detector["backend"]
+        if previous != hand_detector:
+            raise ValueError("Changing the hand detector requires a fresh output_dir")
+    elif hand_detector == "ace" and _has_files(wilor_raw_dir):
+        raise ValueError("ACE requires a fresh output_dir or ACE detector provenance")
+    os.makedirs(wilor_raw_dir, exist_ok=True)
+    if hand_detector == "ace":
+        from v2d.ace_hand.docker.run_video_to_hands import run_video_to_hands as run_ace_video
+        from v2d.ace_hand.docker.cache import ace_output_is_current, ace_hand_contract_fingerprint
+        ace_intrinsics = ace_input_intrinsics or intrinsics_stable
+        current = ace_output_is_current(wilor_raw_dir, video_path=video_path,
+                                        intrinsics_path=ace_intrinsics)
+        if not current and any(_has_files(path) for path in
+                               (masks_dir, wilor_tracks_dir, wilor_aligned_dir,
+                                wilor_aligned_filled_dir, f"{output_dir}/result")):
+            raise RuntimeError(
+                "Stale ACE cache: previous pose convention, inference or camera differs. "
+                "Use a fresh output_dir; hand prompts, masks, matches and alignment "
+                "must be regenerated together."
+            )
+        if not _step("Official ACE video inference + MANO export", current):
+            run_ace_video(video_path=video_path, output_dir=wilor_raw_dir,
+                          weights_dir=ace_weights, backbone_dir=ace_backbone,
+                          mano_dir=ace_mano, intrinsics_path=ace_intrinsics,
+                          cache_dir=ace_cache, dev=dev,
+                          native_prediction_path=ace_native_predictions)
+    elif not _step("WiLoR per-frame detection + MANO",
+                   _has_files(wilor_raw_dir) and
+                   os.path.exists(os.path.join(wilor_raw_dir, f"{reference_frame:06d}.json"))):
+        run_wilor_video(video_path=video_path, output_dir=wilor_raw_dir,
+                        weights_dir=wilor_weights, dev=dev)
+
+    detector_provenance = {"backend": hand_detector}
+    if hand_detector == "ace":
+        fingerprint = ace_hand_contract_fingerprint(wilor_raw_dir)
+        has_hand_derivatives = any(_has_files(path) for path in
+                                   (masks_dir, wilor_tracks_dir, wilor_aligned_dir,
+                                    wilor_aligned_filled_dir, f"{output_dir}/result"))
+        if (has_hand_derivatives and
+                previous_detector.get("hand_contract_fingerprint") != fingerprint):
+            raise RuntimeError(
+                "ACE hand derivatives belong to a different/unversioned pose export. "
+                "Use a fresh output_dir and regenerate hand prompts, masks, matching "
+                "and alignment; replacing raw JSONs alone is insufficient."
+            )
+        detector_provenance["hand_contract_fingerprint"] = fingerprint
+    marker_temp = detector_marker.with_suffix(".tmp")
+    marker_temp.write_text(json.dumps(detector_provenance, indent=2))
+    marker_temp.replace(detector_marker)
+
+    hand_backend_manifest = {"backend": hand_detector}
+    if hand_detector == "ace":
+        completion = json.loads(Path(wilor_raw_dir, "complete.done").read_text())
+        hand_backend_manifest.update({
+            "pose_convention": completion["pose_convention"],
+            "inference_implementation": completion["inference_implementation"],
+            "input_intrinsics_path": ace_input_intrinsics or intrinsics_stable,
+            "input_intrinsics_sha256": completion["intrinsics_sha256"],
+            "native_prediction_path": str(Path(wilor_raw_dir) / completion["native_prediction"]),
+            "native_prediction_sha256": completion["native_prediction_sha256"],
+        })
 
     # Slice out the ref-frame detections for SAM2 seeding + overlay legend.
     ref_wilor = os.path.join(wilor_raw_dir, f"{reference_frame:06d}.json")
@@ -1056,7 +1123,7 @@ def run_ego_wilor(
     if not _step("Render prompts overlay", os.path.exists(prompts_overlay)):
         _render_prompts_overlay(ref_rgb, track_meta, detections, prompts_overlay)
 
-    if not _step("Render masks overlay video", os.path.exists(masks_overlay)):
+    if not skip_hand_overlays and not _step("Render masks overlay video", os.path.exists(masks_overlay)):
         _render_masks_overlay(
             frames_dir=frames_dir,
             masks_dir=masks_dir,
@@ -1258,7 +1325,7 @@ def run_ego_wilor(
 
     if hand_pose_source == "wilor":
         # 10. Render virtual-cam verification overlay (raw, real detections only)
-        if not _step("Render wilor mesh overlay (raw)", os.path.exists(wilor_overlay)):
+        if not skip_hand_overlays and not _step("Render wilor mesh overlay (raw)", os.path.exists(wilor_overlay)):
             run_wilor_render(
                 frames_dir       = frames_dir,
                 wilor_dir        = wilor_tracks_dir,
@@ -1287,7 +1354,7 @@ def run_ego_wilor(
             )
 
         # 12. Render aligned overlay (real frames only) ---------------------
-        if not _step("Render aligned wilor overlay (real only)",
+        if not skip_hand_overlays and not _step("Render aligned wilor overlay (real only)",
                      os.path.exists(wilor_aligned_overlay)):
             run_render_hands_aligned_video(
                 frames_dir         = frames_dir,
@@ -1328,7 +1395,7 @@ def run_ego_wilor(
         )
 
         # 14. Render filled aligned overlay (real + interpolated) ----------
-        if not _step("Render filled aligned wilor overlay",
+        if not skip_hand_overlays and not _step("Render filled aligned wilor overlay",
                      os.path.exists(wilor_aligned_filled_overlay)):
             run_render_hands_aligned_video(
                 frames_dir         = frames_dir,
@@ -2099,6 +2166,8 @@ def run_ego_wilor(
                     "object_prompt": object_prompt,
                     "object_track_id": object_track_id,
                     "hand_pose_source": hand_pose_source,
+                    "hand_detector": hand_detector,
+                    "hand_backend_manifest": hand_backend_manifest,
                     "sam2_hand_prompt_source": sam2_hand_prompt_source,
                     "final_hand_root": final_hand_root,
                     "run_geocalib": run_geocalib_eff,
@@ -2137,15 +2206,19 @@ def run_ego_wilor(
         print(f"  masks_refined   : {masks_refined_dir}/  (hand tracks only)")
         print(f"  masks_refined_overlay : {masks_refined_overlay}")
     print(f"  prompts_overlay : {prompts_overlay}")
-    print(f"  masks_overlay   : {masks_overlay}")
+    if not skip_hand_overlays:
+        print(f"  masks_overlay   : {masks_overlay}")
     if hand_pose_source == "wilor":
         print(f"  wilor (raw tracks)           : {wilor_tracks_dir}/")
-        print(f"  wilor_overlay                : {wilor_overlay}")
+        if not skip_hand_overlays:
+            print(f"  wilor_overlay                : {wilor_overlay}")
         print(f"  wilor_aligned                : {wilor_aligned_dir}/  (real only)")
         print(f"  wilor_aligned/hand_scale.json: per-track multiplicative correction")
-        print(f"  wilor_aligned_overlay        : {wilor_aligned_overlay}")
+        if not skip_hand_overlays:
+            print(f"  wilor_aligned_overlay        : {wilor_aligned_overlay}")
         print(f"  wilor_aligned_filled         : {wilor_aligned_filled_dir}/  (real + interpolated)")
-        print(f"  wilor_aligned_filled_overlay : {wilor_aligned_filled_overlay}")
+        if not skip_hand_overlays:
+            print(f"  wilor_aligned_filled_overlay : {wilor_aligned_filled_overlay}")
     if use_hawor_primary:
         print(f"  hawor (canonical tracks)     : {hawor_dir}/")
         print(f"  hawor_native                 : {hawor_native_dir}/")
@@ -2192,6 +2265,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output_dir",    required=True)
     p.add_argument("--sam2_weights",  default="data/weights/sam2")
     p.add_argument("--wilor_weights", default="data/weights/wilor")
+    from v2d.ace_hand.docker.cli import add_ace_args
+    add_ace_args(p)
     p.add_argument("--reference_frame", type=int, default=0)
     p.add_argument("--sam2_bbox_pad", type=float, default=0.2,
                    help="Pad each WiLoR hand-detection bbox by this ratio "
@@ -2514,6 +2589,12 @@ def run_from_args(args: argparse.Namespace) -> None:
         output_dir              = args.output_dir,
         sam2_weights            = args.sam2_weights,
         wilor_weights           = args.wilor_weights,
+        hand_detector=args.hand_detector,
+        skip_hand_overlays=args.skip_hand_overlays,
+        ace_weights=args.ace_weights, ace_backbone=args.ace_backbone,
+        ace_mano=args.ace_mano, ace_cache=args.ace_cache,
+        ace_input_intrinsics=args.ace_input_intrinsics,
+        ace_native_predictions=args.ace_native_predictions,
         reference_frame         = args.reference_frame,
         sam2_bbox_pad           = args.sam2_bbox_pad,
         sam2_square_wilor_bboxes = args.sam2_square_wilor_bboxes,

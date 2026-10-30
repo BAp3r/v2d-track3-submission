@@ -52,6 +52,7 @@ python -m pip install -e modules/v2d_common \
   -e modules/v2d_sam3d_body/docker \
   -e modules/v2d_unidepth/docker \
   -e modules/v2d_wilor/docker \
+  -e modules/v2d_ace_hand/docker \
   -e modules/v2d_pipelines
 
 echo "Validating installed host packages..."

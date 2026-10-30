@@ -10,6 +10,9 @@ CLI onto the existing runners:
 - ``--hand_tracking hamer`` runs the WiLoR/SAM2/HaMeR path, with optional
   DROID-SLAM, GeoCalib gravity alignment, and refine_simple.py gsplat
   refinement.
+- ``--hand_tracking wilor`` uses WiLoR predictions through matching/alignment.
+- ``--hand_tracking ace`` replaces those predictions with ACE, including final
+  aligned/interpolated hand poses.
 - ``--hand_tracking hawor`` runs the same object/SAM2 path but uses HaWoR as
   the canonical hand-track producer.
 
@@ -311,6 +314,8 @@ def _finalize_result_bundle(
 def _default_threejs_mano_assets_root(args: argparse.Namespace) -> Path:
     if args.threejs_mano_assets_root is not None:
         return Path(args.threejs_mano_assets_root)
+    if args.hand_tracking in {"wilor", "ace"}:
+        return Path(args.wilor_weights) / "pretrained_models"
     if args.hand_tracking in {"hamer", "hawor"}:
         return Path(args.hamer_weights) / "_DATA" / "data"
     return Path(args.mano_weights or args.hand_reconstruction_weights)
@@ -361,6 +366,8 @@ def _add_weight_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--foundation_pose_weights", default="data/weights/foundation_pose")
     p.add_argument("--anycalib_weights", default="data/weights/anycalib")
     p.add_argument("--wilor_weights", default="data/weights/wilor")
+    from v2d.ace_hand.docker.cli import add_ace_args
+    add_ace_args(p)
     p.add_argument("--hamer_weights", default="data/weights/hamer")
     p.add_argument("--droid_slam_weights", default="data/weights/droid_slam")
     p.add_argument("--geocalib_weights_path", default="data/weights/geocalib")
@@ -584,7 +591,9 @@ def parse_args() -> argparse.Namespace:
         help="For --object_mesh, trust the provided mesh scale and skip MoGe/FoundationPose scale estimation.",
     )
     p.add_argument(
-        "--hand_tracking", choices=("dynhamr", "hamer", "hawor"), required=True
+        "--hand_tracking",
+        choices=("dynhamr", "hamer", "hawor", "wilor", "ace"),
+        required=True,
     )
     p.add_argument("--reference_frame", type=int, default=0)
     p.add_argument("--undistort", action="store_true")
@@ -663,6 +672,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def _validate_args(args: argparse.Namespace) -> None:
+    if args.hand_tracking == "ace":
+        args.hand_detector = "ace"
+    if args.hand_tracking == "dynhamr" and getattr(args, "hand_detector", "wilor") != "wilor":
+        raise ValueError("--hand_detector ace requires a non-dynhamr hand tracking mode")
     if args.depth_source is not None and args.depth_source != "moge":
         print(
             "WARNING: --depth_source is deprecated and ignored; this pipeline always uses MoGe."
@@ -696,7 +709,7 @@ def _validate_args(args: argparse.Namespace) -> None:
         if unsupported:
             joined = ", ".join(unsupported)
             raise ValueError(
-                f"{joined} are only supported with --hand_tracking hamer or hawor in this consolidated entrypoint."
+                f"{joined} require a non-dynhamr hand tracking mode in this consolidated entrypoint."
             )
 
 
@@ -735,6 +748,12 @@ def _run_hamer(args: argparse.Namespace) -> Path:
         output_dir=args.output_dir,
         sam2_weights=args.sam2_weights,
         wilor_weights=args.wilor_weights,
+        hand_detector=args.hand_detector,
+        skip_hand_overlays=args.skip_hand_overlays,
+        ace_weights=args.ace_weights, ace_backbone=args.ace_backbone,
+        ace_mano=args.ace_mano, ace_cache=args.ace_cache,
+        ace_input_intrinsics=args.ace_input_intrinsics,
+        ace_native_predictions=args.ace_native_predictions,
         reference_frame=args.reference_frame,
         sam2_bbox_pad=args.sam2_bbox_pad,
         sam2_square_wilor_bboxes=args.sam2_square_wilor_bboxes,
@@ -766,7 +785,9 @@ def _run_hamer(args: argparse.Namespace) -> Path:
         bg_init_stride=args.bg_init_stride,
         bg_voxel_size=args.bg_voxel_size,
         bg_max_points=args.bg_max_points,
-        hand_pose_source=args.hand_tracking,
+        hand_pose_source=(
+            "wilor" if args.hand_tracking in {"wilor", "ace"} else args.hand_tracking
+        ),
         run_hamer_pass=(args.hand_tracking == "hamer"),
         hamer_weights=args.hamer_weights,
         hamer_bbox_expansion=args.hamer_bbox_expansion,
@@ -831,7 +852,7 @@ def run_from_args(args: argparse.Namespace) -> None:
     _validate_args(args)
     if args.hand_tracking == "dynhamr":
         final_result_dir = _run_dynhamr(args)
-    elif args.hand_tracking in {"hamer", "hawor"}:
+    elif args.hand_tracking in {"hamer", "hawor", "wilor", "ace"}:
         final_result_dir = _run_hamer(args)
     else:  # pragma: no cover - argparse prevents this.
         raise ValueError(f"Unsupported hand tracking mode: {args.hand_tracking}")
