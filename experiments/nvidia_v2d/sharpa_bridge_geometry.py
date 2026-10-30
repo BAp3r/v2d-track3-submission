@@ -50,6 +50,7 @@ def mano_world_geometry(
     upstream: Path,
     mano_root: Path,
     alignment: np.ndarray,
+    *, allow_inferred_hands: bool = False,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """权威几何由 native-side FK＋质心缩放＋共同 SE(3) 得到。"""
     import torch
@@ -158,7 +159,9 @@ def mano_world_geometry(
                 )
         accepted = arrays[prefix + "_source_code"] == 1
         if not accepted.any():
-            raise ValueError(f"{side} has no accepted shape observation")
+            if not allow_inferred_hands:
+                raise ValueError(f"{side} has no accepted shape observation")
+            accepted = arrays[prefix + "_is_valid"]
         metric_scale = float(np.median(scales[accepted]))
         _, open_joints = scale_about_centroid(
             rest["vertices"], rest["joints"], np.array([metric_scale])

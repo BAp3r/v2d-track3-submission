@@ -47,7 +47,8 @@ class HandCalibrationInput(BaseModel):
     open_joints_m: list[list[float]]
     open_wrist_wxyz: list[float]
     joint_names: list[str]
-    source: Literal["median_accepted_mano_shape_open_pose"]
+    source: Literal["median_accepted_mano_shape_open_pose", "submission_inferred_mano_open_pose"]
+    allow_inferred_hands: bool = False
     shape_betas: list[float]
     metric_hand_scale: float = Field(gt=0)
     valid: list[bool]
@@ -95,7 +96,8 @@ def _retarget_side(
 
     joints = np.asarray(row[f"mano_{side}_joints"], dtype=float)
     quats = np.asarray(row[f"mano_{side}_joints_wxyz"], dtype=float)
-    validate_source_hand(joints, quats, hand.valid, hand.source_code, hand.joint_names)
+    validate_source_hand(joints, quats, hand.valid, hand.source_code, hand.joint_names,
+                         allow_inferred_hands=hand.allow_inferred_hands)
     xml = (
         upstream
         / f"robotic_grounding/source/robotic_grounding/robotic_grounding/assets/xmls/sharpawave/{side}_sharpawave.xml"

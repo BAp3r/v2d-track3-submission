@@ -138,6 +138,7 @@ def validate_source_hand(
     valid: ArrayLike,
     source_code: ArrayLike,
     joint_names: list[str],
+    *, allow_inferred_hands: bool = False,
 ) -> None:
     points = np.asarray(joints, dtype=np.float64)
     quats = np.asarray(wxyz, dtype=np.float64)
@@ -158,6 +159,6 @@ def validate_source_hand(
         or validity.dtype != np.bool_
         or not validity.all()
         or codes.shape != (count,)
-        or not np.isin(codes, [1, 2]).all()
+        or not np.isin(codes, [1, 2, 3] if allow_inferred_hands else [1, 2]).all()
     ):
         raise ValueError("完整训练序列包含缺失、拒绝或外推手帧")

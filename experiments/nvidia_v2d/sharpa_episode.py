@@ -60,7 +60,7 @@ def _runs(mask: NDArray) -> list[tuple[int, int]]:
     )
 
 
-def audit_bundle(source: EpisodeSource, arrays: dict[str, NDArray]) -> EpisodeAudit:
+def audit_bundle(source: EpisodeSource, arrays: dict[str, NDArray], *, allow_inferred_hands: bool = False) -> EpisodeAudit:
     """检查完整片段资格；不删除帧、不把单端填充改称观测。"""
     n = source.frame_count
     blockers: list[str] = []
@@ -99,7 +99,7 @@ def audit_bundle(source: EpisodeSource, arrays: dict[str, NDArray]) -> EpisodeAu
             blockers.append(f"{side}:source_flags_disagree")
         if not valid.all():
             blockers.append(f"{side}:unavailable_hand_frames")
-        if np.any(codes == 3):
+        if np.any(codes == 3) and not allow_inferred_hands:
             blockers.append(f"{side}:extrapolated_frames")
         for start, end in _runs(codes == 2):
             if (
@@ -110,7 +110,8 @@ def audit_bundle(source: EpisodeSource, arrays: dict[str, NDArray]) -> EpisodeAu
                 or codes[start - 1] != 1
                 or codes[end] != 1
             ):
-                blockers.append(f"{side}:unsupported_interpolation")
+                if not allow_inferred_hands:
+                    blockers.append(f"{side}:unsupported_interpolation")
                 break
         expected = {
             "_betas": (10,),

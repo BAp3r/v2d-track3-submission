@@ -50,7 +50,7 @@ def merge_contacts(contacts: list[dict[str, Any]]) -> dict[str, list]:
 
 
 def assemble(source: EpisodeSource, jobs: dict[str, Path], anchor: str,
-             upstream: Path, mano_root: Path, output: Path) -> dict[str, Any]:
+             upstream: Path, mano_root: Path, output: Path, *, delivery: bool = False) -> dict[str, Any]:
     import pyarrow as pa
     import pyarrow.parquet as pq
     import trimesh
@@ -78,7 +78,8 @@ def assemble(source: EpisodeSource, jobs: dict[str, Path], anchor: str,
             raise ValueError(f'quality hash mismatch: {name}')
         with np.load(npz, allow_pickle=False) as f:
             item = {k: f[k] for k in f.files}
-        audit = audit_bundle(source.model_copy(update={'object_names': [name]}), item)
+        audit = audit_bundle(source.model_copy(update={'object_names': [name]}), item,
+                             allow_inferred_hands=delivery)
         if not audit.input_contract_passed:
             raise ValueError(f'{name}: {audit.blockers}')
         arrays.append(item)
@@ -91,7 +92,7 @@ def assemble(source: EpisodeSource, jobs: dict[str, Path], anchor: str,
     output.mkdir(parents=True, exist_ok=False)
     anchor_output = output / 'anchor-only'
     receipt = export_episode(source.model_copy(update={'object_names': [anchor]}),
-                             jobs[anchor], upstream, mano_root, anchor_output)
+                             jobs[anchor], upstream, mano_root, anchor_output, delivery=delivery)
     if not receipt['input_contract_passed']:
         raise ValueError('anchor hand export failed')
     row_table = pq.read_table(anchor_output / 'loaded.parquet')

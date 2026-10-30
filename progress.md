@@ -747,3 +747,18 @@
 - 03双物体固定world0 actual导出626行、原body系两STL，官方reader round-trip误差0。加旧37 zero-shot实际导出，本地覆盖1→2/20；官方packer实际拒绝还缺18集，未上传/无官方排名分数。新文件`candidate03-local-only-001/receipt.json`与`partial-roster-check-001/packer.log`保留完整凭据。
 - 新固定world0完整视频313帧20Hz及联系图在`visual03-world0-002/`；实际捕获右手—勺仅9/9/15/11接触帧，双拇指接触0，非承载力证据。手靠近/经过物体不等于稳定抓取；此为03，与此前44分开。第一次渲染asset路径失败亦保留。
 - 定向查到Open-CHOIR有stage2抓握深度修正+stage3时序拟合实际代码/权重说明，但双手双体主要拆分两路拟合，不能天然保证共同frame；加入重建侧最小对照。已有Dyn-HaMR/WiLoR入口先核版本，避免重复接入。43相关测试通过、2可选跳过；旧基线与用户reconstruction改动保留。
+
+## 2026-10-30 — 用户改为完整提交优先，全量覆盖批次启动
+
+- 用户明确本轮以完整有效提交为首要目标，减少额外门禁。仅阻断错身份/缺对象帧/非有限/辅助冒充actual及官方格式失败；本地成功率、手自然度、论文探索不作前置。
+- 更正之前“六对象重建缺失”：failed wrapper的preserved目录中实际均有完整result_slam/result.npz与mesh，36对象原始重建已可复用，未替换模板或其它物体。20集所有双体camera逐值一致；已恢复并完成20集共同场景/官方IK CPU流程。
+- 新full-submission-20261030-001批次采用显式delivery推断手输入：缺帧使用最近真实观测、完全未观测手以中性形态放到任务区域外，source_code=3且provenance完整，不改成observed。严格研究模式默认保持，额外几何质量不阻断交付。20集36对象都来自各自原视频重建；原始文件不修改。24相关测试通过。
+- 先使用已有匹配维度的学习actor进行完整zero-shot物理执行：双体03 131072步checkpoint、单体旧official 2097152步checkpoint。新增训练0，不以成功率0为由跳过；每集固定world0，真实全长20Hz、物体辅助每步0、保留失败。SwanLab/TensorBoard监控已先ready；当前8/20实际轨迹导出完成，继续自动执行。
+- 浏览器只读核对六榜均未加入，公开源码仓库尚未创建。准备最小31文件源码快照及实际本地commit（无旧Git历史/数据/无关用户改动），待全量包完成后按CUA action-time策略一次具体确认“公开此代码包＋接受六榜规则”。既有上传授权不重复询问。浏览器支持filechooser.setFiles本地Parquet上传，尚未执行上传。
+
+### 2026-10-30 — 完整提交包已生成并通过官方本地校验
+
+- 20/20集、36/36对象全部完成实际学习策略物理rollout，固定world0，原生20Hz，共5,181个控制时刻、9,120行物体轨迹。全部actual body states有限、environment_valid为真、逐步辅助为0，官方reader round-trip误差0；无按成功筛选。GPU评估耗时相加831.77秒，新增训练0，复用两个已训练actor。
+- 本地CHORD仍0/20，属重建参考代理，未声称稳定成功或官方分数改善。手缺帧推断和完全缺手的中性停放明确留在provenance；不作为隐藏真值或已验证自然抓握。完整覆盖由上一轮2/20提升至20/20。
+- 未修改官方packer与uploader，实际通过完整名册/mesh/字段校验；主包track3_submission.parquet为2,842,400字节/9,120行，CD-O派生包4,064,212字节/294,912点。精确SHA与校验器SHA见full-submission-20261030-001/submission-readiness.json。20个评估系列SwanLab及TensorBoard逐标量回读全部通过，既有训练loss/checkpoint保留；完整实际执行凭据见complete-evidence.json。
+- 准备独立31文件公开源码快照，实际commit c3e975141a3a5a5c497ecdbdf9fd99fe6b7facb7；不含本仓库旧历史/视频数据/权重/用户无关改动。用户现已明确授权公开该代码包并接受六场Kaggle规则；浏览器继续执行创建仓库、加入六榜、上传。当前尚未取得正式提交回执，不报已提交或排名。

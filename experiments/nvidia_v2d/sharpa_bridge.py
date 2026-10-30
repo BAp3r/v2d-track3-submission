@@ -197,6 +197,7 @@ def _export_episode(
     output: Path,
     *,
     audit_only: bool = False,
+    delivery: bool = False,
 ) -> dict[str, Any]:
     """写新实例及 sidecar；非法完整片段只输出 gate，不输出可训练 Parquet。"""
     quality = job / "hand-quality"
@@ -213,7 +214,7 @@ def _export_episode(
         raise ValueError("质量束哈希与已发布凭据不一致")
     with np.load(npz_path, allow_pickle=False) as loaded:
         arrays = {name: loaded[name] for name in loaded.files}
-    audit = audit_bundle(source, arrays)
+    audit = audit_bundle(source, arrays, allow_inferred_hands=delivery)
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "input-gate.json", audit.model_dump(mode="json"))
     if audit_only or not audit.input_contract_passed:
@@ -231,7 +232,8 @@ def _export_episode(
         return result
 
     started = datetime.now(UTC).isoformat()
-    shape_provenance = accepted_shape_provenance(job, arrays)
+    shape_provenance = (json.loads((quality / "provenance.json").read_text())["shape_provenance"]
+                        if delivery else accepted_shape_provenance(job, arrays))
     inputs = [
         npz_path,
         bundle / "mesh.obj",
@@ -257,7 +259,8 @@ def _export_episode(
     )
     alignment = scene_alignment(np.asarray(mesh.vertices), arrays["object_to_world_transform"][0])
     objects = alignment[None] @ arrays["object_to_world_transform"]
-    geometry, fk_diagnostics = mano_world_geometry(arrays, upstream, mano_root, alignment)
+    geometry, fk_diagnostics = mano_world_geometry(arrays, upstream, mano_root, alignment,
+                                                 allow_inferred_hands=delivery)
     row: dict[str, Any] = ManoSharpaData(
         **{name: None for name, _, _, is_ts in ManoSharpaData._field_specs if not is_ts}
     ).to_dict()
@@ -321,7 +324,8 @@ def _export_episode(
             "open_wrist_wxyz": hand["open_wrist_wxyz"].tolist(),
             "open_coordinate_frame": "native_mano_zero_global_orientation",
             "joint_names": MANO_JOINTS_ORDER,
-            "source": "median_accepted_mano_shape_open_pose",
+            "source": "submission_inferred_mano_open_pose" if delivery else "median_accepted_mano_shape_open_pose",
+            "allow_inferred_hands": delivery,
             "shape_betas": hand["betas"].tolist(),
             "shape_provenance": shape_provenance[side],
             "left_shape_mirror_corrected_in_memory": fk_diagnostics[side][
@@ -390,11 +394,12 @@ def export_episode(
     output: Path,
     *,
     audit_only: bool = False,
+    delivery: bool = False,
 ) -> dict[str, Any]:
     require_new_output(output, [job, source.source_video.parent, upstream, mano_root])
     started = datetime.now(UTC).isoformat()
     try:
-        return _export_episode(source, job, upstream, mano_root, output, audit_only=audit_only)
+        return _export_episode(source, job, upstream, mano_root, output, audit_only=audit_only, delivery=delivery)
     except Exception as exc:
         if output.is_dir() and not (output / "manifest.json").exists():
             write_json(

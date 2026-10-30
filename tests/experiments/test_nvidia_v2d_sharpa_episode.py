@@ -214,3 +214,16 @@ def test_blocked_export_writes_audit_and_no_trainable_parquet(tmp_path: Path):
     assert (output / "manifest.json").is_file()
     assert not (output / "loaded.parquet").exists()
     assert digest(video) == metadata.source_video_sha256
+
+
+def test_delivery_allows_labeled_inference_but_still_rejects_nonfinite_geometry():
+    data = arrays()
+    data['hand_left_source_code'][:] = 3
+    data['hand_left_is_observed'][:] = False
+    assert not audit_bundle(source(), data).input_contract_passed
+    allowed = audit_bundle(source(), data, allow_inferred_hands=True)
+    assert allowed.input_contract_passed
+    assert allowed.hands['left'].source_counts['observed'] == 0
+    assert allowed.geometry_quality_accepted is False
+    data['object_to_world_transform'][0, 0, 0] = np.nan
+    assert not audit_bundle(source(), data, allow_inferred_hands=True).input_contract_passed
