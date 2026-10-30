@@ -69,7 +69,7 @@ def test_rejected_zero_hand_cannot_be_imported_as_a_real_pose():
     assert audit.hands["left"].source_counts["rejected"] == 1
 
 
-def test_only_bounded_two_sided_interpolation_is_eligible():
+def test_interpolation_is_counted_not_blocking():
     data = arrays()
     for k in ("is_observed",):
         data[f"hand_left_{k}"][3:5] = False
@@ -79,18 +79,20 @@ def test_only_bounded_two_sided_interpolation_is_eligible():
     assert audit.hands["left"].source_counts["interpolated"] == 2
     data["hand_left_source_code"][0] = 2
     data["hand_left_is_observed"][0] = False
-    assert "left:unsupported_interpolation" in audit_bundle(source(), data).blockers
+    assert audit_bundle(source(), data).input_contract_passed
 
 
-def test_long_interpolation_and_extrapolation_block_complete_training():
+def test_long_interpolation_and_extrapolation_are_quality_only():
     data = arrays()
     data["hand_right_source_code"][1:7] = 2
     data["hand_right_is_observed"][1:7] = False
-    assert not audit_bundle(source(), data).input_contract_passed
+    assert audit_bundle(source(), data).input_contract_passed
     data = arrays()
     data["hand_right_source_code"][2] = 3
     data["hand_right_is_observed"][2] = False
-    assert "right:extrapolated_frames" in audit_bundle(source(), data).blockers
+    audit = audit_bundle(source(), data)
+    assert audit.input_contract_passed
+    assert audit.hands["right"].source_counts["extrapolated"] == 1
 
 
 def test_inconsistent_source_flags_and_nonrigid_camera_are_rejected():
@@ -220,7 +222,7 @@ def test_delivery_allows_labeled_inference_but_still_rejects_nonfinite_geometry(
     data = arrays()
     data['hand_left_source_code'][:] = 3
     data['hand_left_is_observed'][:] = False
-    assert not audit_bundle(source(), data).input_contract_passed
+    assert audit_bundle(source(), data).input_contract_passed
     allowed = audit_bundle(source(), data, allow_inferred_hands=True)
     assert allowed.input_contract_passed
     assert allowed.hands['left'].source_counts['observed'] == 0

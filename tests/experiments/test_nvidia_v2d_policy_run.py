@@ -38,7 +38,7 @@ def test_budget_rejects_assisted_or_unbounded_comparison():
     budget = TrainingBudget(total_steps=100352, world_count=256)
     assert budget.seeds == (42, 43, 44)
     assert budget.motion_speed == 1
-    for changes in ({"wall_limit_s": 7201}, {"motion_speed": 0.5}, {"total_steps": 100353}):
+    for changes in ({"wall_limit_s": 172801}, {"motion_speed": 0.5}, {"total_steps": 100353}):
         with pytest.raises(ValueError):
             TrainingBudget.model_validate({**budget.model_dump(), **changes})
 

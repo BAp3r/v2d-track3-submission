@@ -11,7 +11,7 @@ class TrainingBudget(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     total_steps: int = Field(gt=0, strict=True)
     world_count: int = Field(gt=0, le=4096, strict=True)
-    wall_limit_s: int = Field(default=7200, gt=0, le=7200, strict=True)
+    wall_limit_s: int = Field(default=7200, gt=0, le=172800, strict=True)
     seeds: tuple[int, ...] = (42, 43, 44)
     motion_speed: float = Field(default=1.0, ge=1, le=1, allow_inf_nan=False)
 

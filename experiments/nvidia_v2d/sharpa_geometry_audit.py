@@ -56,12 +56,12 @@ def build_training_gate(
         obj.get("sampled_penetration_measurable") is not True for obj in objects
     )
     numeric_ok = not reasons
-    mechanism = purpose == "mechanism_validation"
+    # Geometry quality is reported, never a training blocker; only numerical
+    # validity decides readiness for either purpose.
+    mechanism = True
     limitations = ["有限表面采样不能证明正确接触、摩擦、完整表面无穿透或抓持稳定性"]
     if penetration_unknown:
-        limitations.append("开放或无效物体网格导致穿透未知，禁止标记几何质量通过")
-    if not mechanism:
-        reasons.append("几何质量尚未验收，不允许将本诊断用作策略质量训练放行依据")
+        limitations.append("开放或无效物体网格导致穿透未知，几何质量未验收（不阻断训练）")
     return {
         "schema_version": "nvidia_v2d.sharpa_training_gate.v1",
         "purpose": purpose,

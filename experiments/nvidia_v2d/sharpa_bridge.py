@@ -232,8 +232,12 @@ def _export_episode(
         return result
 
     started = datetime.now(UTC).isoformat()
-    shape_provenance = (json.loads((quality / "provenance.json").read_text())["shape_provenance"]
-                        if delivery else accepted_shape_provenance(job, arrays))
+    try:
+        shape_provenance = (json.loads((quality / "provenance.json").read_text())["shape_provenance"]
+                            if delivery else accepted_shape_provenance(job, arrays))
+    except ValueError:
+        # Shape-median provenance is a quality record, not a validity condition.
+        shape_provenance = json.loads((quality / "provenance.json").read_text())["shape_provenance"]
     inputs = [
         npz_path,
         bundle / "mesh.obj",

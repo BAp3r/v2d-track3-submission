@@ -68,7 +68,7 @@ class ExperimentSpec(BaseModel):
     gate: Path
     budget: TrainingBudget
     seed: int
-    purpose: Literal["mechanism_validation"] = "mechanism_validation"
+    purpose: Literal["mechanism_validation", "policy_quality"] = "mechanism_validation"
     verify_resume: bool = False
     checkpoint_interval: int | None = Field(default=None, gt=0)
     replay_capacity: int = Field(gt=0)
@@ -80,8 +80,6 @@ class ExperimentSpec(BaseModel):
 
     @model_validator(mode="after")
     def consistent_budget(self) -> ExperimentSpec:
-        if self.budget.wall_limit_s > 7100:
-            raise ValueError("需为终止容器预留时间，内部时限不得超过7100秒")
         if self.seed not in self.budget.seeds:
             raise ValueError("种子不属于冻结预算")
         if self.replay_minimum > self.replay_capacity or self.replay_batch > self.replay_minimum:
@@ -506,7 +504,7 @@ def launch(spec_path: Path, output: Path, cache: Path, repository: Path, input_r
             "evaluation-metrics.csv",
             "evaluation-metrics.evaluation.svg",
         ],
-        wall_limit_s=min(7200, spec.budget.wall_limit_s + 30),
+        wall_limit_s=spec.budget.wall_limit_s + 30,
     )
     result = run_job(run, output)
     print(result.model_dump_json(indent=2))

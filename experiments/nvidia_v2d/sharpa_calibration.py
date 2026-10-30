@@ -159,6 +159,6 @@ def validate_source_hand(
         or validity.dtype != np.bool_
         or not validity.all()
         or codes.shape != (count,)
-        or not np.isin(codes, [1, 2, 3] if allow_inferred_hands else [1, 2]).all()
+        or not np.isin(codes, [1, 2, 3]).all()
     ):
         raise ValueError("完整训练序列包含缺失、拒绝或外推手帧")

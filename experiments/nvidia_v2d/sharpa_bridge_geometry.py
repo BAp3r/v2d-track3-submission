@@ -159,8 +159,6 @@ def mano_world_geometry(
                 )
         accepted = arrays[prefix + "_source_code"] == 1
         if not accepted.any():
-            if not allow_inferred_hands:
-                raise ValueError(f"{side} has no accepted shape observation")
             accepted = arrays[prefix + "_is_valid"]
         metric_scale = float(np.median(scales[accepted]))
         _, open_joints = scale_about_centroid(

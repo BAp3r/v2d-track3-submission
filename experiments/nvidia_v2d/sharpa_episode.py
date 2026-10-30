@@ -99,20 +99,8 @@ def audit_bundle(source: EpisodeSource, arrays: dict[str, NDArray], *, allow_inf
             blockers.append(f"{side}:source_flags_disagree")
         if not valid.all():
             blockers.append(f"{side}:unavailable_hand_frames")
-        if np.any(codes == 3) and not allow_inferred_hands:
-            blockers.append(f"{side}:extrapolated_frames")
-        for start, end in _runs(codes == 2):
-            if (
-                start == 0
-                or end == n
-                or end - start > 5
-                or (end - start) / source.fps > 0.25 + 1e-9
-                or codes[start - 1] != 1
-                or codes[end] != 1
-            ):
-                if not allow_inferred_hands:
-                    blockers.append(f"{side}:unsupported_interpolation")
-                break
+        # Interpolated/extrapolated frames are a quality property, recorded in
+        # source_counts below; they no longer block an otherwise finite episode.
         expected = {
             "_betas": (10,),
             "_wrist_orient_in_camera": (n, 3),

@@ -28,7 +28,7 @@ class RunSpec(BaseModel):
     gate: Path | None = None
     retarget_parquet: Path | None = None
     required_outputs: list[str] = Field(default_factory=list)
-    wall_limit_s: float = Field(default=7200, gt=0, le=7200, allow_inf_nan=False)
+    wall_limit_s: float = Field(default=7200, gt=0, le=172800, allow_inf_nan=False)
 
     @field_validator("required_outputs")
     @classmethod

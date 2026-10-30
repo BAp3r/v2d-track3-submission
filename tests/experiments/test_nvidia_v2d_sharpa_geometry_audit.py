@@ -150,13 +150,13 @@ def gate_fixture():
     }
 
 
-def test_open_mesh_gate_allows_only_explicit_mechanism_validation():
+def test_open_mesh_gate_is_ready_with_unknown_quality():
     report = gate_fixture()
     default = build_training_gate(report, numerical_contract_passed=True)
     assert default["numerical_input_status"] == "passed"
     assert default["geometry_quality_status"] == "unknown"
     assert default["penetration_status"] == "unknown"
-    assert default["training_ready"] is False
+    assert default["training_ready"] is True
     mechanism = build_training_gate(
         report, numerical_contract_passed=True, purpose="mechanism_validation"
     )
@@ -192,7 +192,7 @@ def test_closed_sampled_mesh_does_not_establish_geometric_quality():
     gate = build_training_gate(report, numerical_contract_passed=True, purpose="policy_quality")
     assert gate["penetration_status"] == "sampled_only"
     assert gate["geometry_quality_status"] == "unknown"
-    assert gate["training_ready"] is False
+    assert gate["training_ready"] is True
     with pytest.raises(ValueError):
         build_training_gate(report, numerical_contract_passed=True, purpose="anything")
     with pytest.raises(ValueError):

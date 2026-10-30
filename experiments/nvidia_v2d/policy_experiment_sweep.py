@@ -105,7 +105,7 @@ def _wait_existing_container(output: Path) -> None:
     if check.returncode == 0 and check.stdout.strip() == "true":
         # The container owns an internal hard timeout. A resumed sweep must not
         # allocate the GPU concurrently just because the earlier host exited.
-        subprocess.run(["docker", "wait", name], check=False, timeout=7200, stdout=subprocess.DEVNULL)
+        subprocess.run(["docker", "wait", name], check=False, timeout=172800, stdout=subprocess.DEVNULL)
 
 
 def run_sweep(plan_path: Path) -> dict[str, Any]:

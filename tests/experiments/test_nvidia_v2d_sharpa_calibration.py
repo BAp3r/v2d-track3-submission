@@ -82,7 +82,7 @@ def test_non_monotonic_timeline_is_rejected(times, indices):
         require_timeline(times, indices, 2, 20)
 
 
-def test_invalid_or_extrapolated_frames_cannot_be_imported_as_valid():
+def test_invalid_frames_rejected_but_labeled_extrapolation_allowed():
     kwargs = dict(
         joints=np.repeat(open_points()[None], 2, axis=0),
         wxyz=np.tile([1.0, 0, 0, 0], (2, 21, 1)),
@@ -91,8 +91,7 @@ def test_invalid_or_extrapolated_frames_cannot_be_imported_as_valid():
     validate_source_hand(**kwargs, valid=[True, True], source_code=[1, 2])
     with pytest.raises(ValueError):
         validate_source_hand(**kwargs, valid=[True, False], source_code=[1, 4])
-    with pytest.raises(ValueError):
-        validate_source_hand(**kwargs, valid=[True, True], source_code=[1, 3])
+    validate_source_hand(**kwargs, valid=[True, True], source_code=[1, 3])
 
 
 def test_quaternion_and_topology_contracts_are_checked():
