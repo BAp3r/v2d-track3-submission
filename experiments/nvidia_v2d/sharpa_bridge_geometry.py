@@ -26,17 +26,30 @@ def load_upstream_module(upstream: Path, name: str) -> Any:
     return module
 
 
-def scene_alignment(vertices: np.ndarray, object_first_pose: np.ndarray) -> np.ndarray:
-    """官方单目标 PCA 落地启发式；不是重力或支撑面真值。"""
+def scene_alignment(
+    vertices: np.ndarray, object_first_pose: np.ndarray, up: np.ndarray | None = None
+) -> np.ndarray:
+    """Rotate `up` to +z and drop the first-frame object's lowest point to z=0.
+
+    Without `up` this is the official single-object PCA landing heuristic (not gravity or
+    support truth). An explicit `up` (e.g. an estimated table-plane normal) replaces only
+    the direction; the height and xy centring rules are unchanged.
+    """
     from scipy.spatial.transform import Rotation
 
     world = vertices @ object_first_pose[:3, :3].T + object_first_pose[:3, 3]
     center = world.mean(axis=0)
     centered = world - center
-    _, axes = np.linalg.eigh(centered.T @ centered)
-    up = axes[:, int(np.argmin(np.ptp(centered @ axes, axis=0)))]
-    if np.dot(up, center) > 0:
-        up = -up
+    if up is None:
+        _, axes = np.linalg.eigh(centered.T @ centered)
+        up = axes[:, int(np.argmin(np.ptp(centered @ axes, axis=0)))]
+        if np.dot(up, center) > 0:
+            up = -up
+    else:
+        up = np.asarray(up, dtype=np.float64)
+        if up.shape != (3,) or not np.isfinite(up).all() or np.linalg.norm(up) < 1e-9:
+            raise ValueError("scene up must be a finite nonzero 3-vector")
+        up = up / np.linalg.norm(up)
     rotation = Rotation.align_vectors(np.array([[0, 0, 1]]), up[None])[0].as_matrix()
     rotated = world @ rotation.T
     result = np.eye(4)

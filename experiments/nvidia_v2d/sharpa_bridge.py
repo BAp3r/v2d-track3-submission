@@ -261,7 +261,8 @@ def _export_episode(
     mesh, mesh_path, urdf = _assets(
         bundle, output, upstream, source.object_names[0], float(arrays["object_scale"])
     )
-    alignment = scene_alignment(np.asarray(mesh.vertices), arrays["object_to_world_transform"][0])
+    alignment = scene_alignment(np.asarray(mesh.vertices), arrays["object_to_world_transform"][0],
+                                arrays.get("scene_up_world"))
     objects = alignment[None] @ arrays["object_to_world_transform"]
     geometry, fk_diagnostics = mano_world_geometry(arrays, upstream, mano_root, alignment,
                                                  allow_inferred_hands=delivery)
